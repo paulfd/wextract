@@ -1,0 +1,54 @@
+project(WavetableExtract)
+cmake_minimum_required(VERSION 3.11)
+set (CMAKE_CXX_STANDARD 11)
+
+find_package(OpenGL REQUIRED)
+# find_package(glfw3 REQUIRED)
+set(CMAKE_CXX_FLAGS_DEBUG "/MDd")
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/glfw)
+
+# add_subdirectory(third_party/abseil-cpp)
+
+add_library(sfizz SHARED IMPORTED)
+set_target_properties(sfizz PROPERTIES 
+    IMPORTED_IMPLIB "${CMAKE_SOURCE_DIR}/third_party/sfizz/sfizz.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/third_party/sfizz"
+)
+
+add_library(glad STATIC src/glad.c)
+target_include_directories(glad PUBLIC include)
+
+add_library(imgui STATIC 
+    third_party/imgui/imgui.cpp
+    third_party/imgui/imgui_demo.cpp
+    third_party/imgui/imgui_draw.cpp
+    third_party/imgui/imgui_tables.cpp
+    third_party/imgui/imgui_widgets.cpp
+    third_party/imgui/backends/imgui_impl_opengl3.cpp
+    third_party/imgui/backends/imgui_impl_glfw.cpp
+)
+target_link_libraries(imgui PRIVATE glad glfw)
+target_include_directories(imgui PUBLIC third_party/imgui)
+target_include_directories(imgui PUBLIC third_party/imgui/backends)
+
+add_library(miniaudio STATIC 
+    third_party/miniaudio/extras/miniaudio_split/miniaudio.c
+)
+target_include_directories(miniaudio PUBLIC third_party/miniaudio/extras/miniaudio_split)
+message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
+add_executable(wextract src/main.cpp)
+target_include_directories(wextract PRIVATE include)
+target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui miniaudio)
+
+add_custom_command(TARGET wextract POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${PROJECT_SOURCE_DIR}/extras/sine_c3.wav"
+        $<TARGET_FILE_DIR:wextract>)
+
+add_custom_command(TARGET wextract POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${PROJECT_SOURCE_DIR}/third_party/sfizz/$<CONFIG>/sfizz.dll"
+        $<TARGET_FILE_DIR:wextract>)
