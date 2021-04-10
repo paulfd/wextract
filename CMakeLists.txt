@@ -21,6 +21,7 @@ else()
     find_package(PkgConfig REQUIRED) 
     pkg_check_modules(sfizz REQUIRED IMPORTED_TARGET GLOBAL sfizz)
     add_library(sfizz ALIAS PkgConfig::sfizz)
+    message("sfizz flags: ${sfizz_LDFLAGS}")
 endif()
 
 add_library(glad STATIC src/glad.c)
