@@ -23,6 +23,7 @@ jobs:
         sudo apt-get update && \
         sudo apt-get install \
           pkg-config \
+          libsndfile1-dev \
           libsfizz0-dev \
           libglfw3-dev
 
