@@ -37,6 +37,3 @@ struct {
 #define TOKENPASTE2(x, y) TOKENPASTE(x, y)
 
 #define defer auto TOKENPASTE2(__deferred_lambda_call, __COUNTER__) = deferrer << [&]
-
-#undef TOKENPASTE
-#undef TOKENPASTE2

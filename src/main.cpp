@@ -2,29 +2,34 @@
 #include <GLFW/glfw3.h>
 #include <string>
 #include <array>
+#include <algorithm>
 #include <iostream>
 #include "imgui.h"
+#include "implot.h"
+#include "implot_internal.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include "sfizz.hpp"
 #include "defer.h"
 #include "miniaudio.h"
-#define TOKENPASTE(x, y) x ## y
-#define TOKENPASTE2(x, y) TOKENPASTE(x, y)
-#define defer auto TOKENPASTE2(__deferred_lambda_call, __COUNTER__) = deferrer << [&]
 
-std::string programName = "GLFW window";
-int windowWidth = 1200,
-    windowHeight = 800;
-float backgroundR = 0.1f,
-      backgroundG = 0.3f,
-      backgroundB = 0.2f;
+std::string programName = "wextract";
+
+float windowWidth = 800;
+float windowHeight = 600;
+
+double regionStart = 1.0f;
+double regionEnd = 2.0f;
+bool mouseClicked = false;
+bool dragging = false;
 
 constexpr ma_uint32 blockSize { 256 };
 
 static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
-    glViewport(0, 0, width, height);
+    // glViewport(0, 0, width, height);
+    windowWidth = static_cast<float>(width);
+    windowHeight = static_cast<float>(height);
 }
 
 static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount)
@@ -62,7 +67,6 @@ int main(int argc, char *argv[])
     sfz::Sfizz synth;
     synth.setSamplesPerBlock(blockSize);
     synth.loadSfzString("", "<region> sample=*sine loop_mode=one_shot ampeg_attack=0.03 ampeg_release=1");
-    // ma_decoder decoder;
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
     config.playback.format   = ma_format_f32;   
     config.playback.channels = 0;               // Set to 0 to use the device's native channel count.
@@ -71,16 +75,14 @@ int main(int argc, char *argv[])
     config.pUserData         = &synth;
 
     ma_device device;
-    defer { 
-        ma_device_uninit(&device); 
-    };
+    defer { ma_device_uninit(&device); };
 
     if (ma_device_init(NULL, &config, &device) != MA_SUCCESS) {
         std::cerr << "[ERROR] Failed to initialize device\n";
         return -1;
     }
     synth.setSampleRate(device.sampleRate);
-    ma_device_start(&device);     
+    ma_device_start(&device);
     
     std::cout << "Backend: " << ma_get_backend_name(device.pContext->backend) << '\n';
     std::cout << "Sample rate: " << device.sampleRate << '\n';
@@ -88,7 +90,6 @@ int main(int argc, char *argv[])
         std::cerr << "[ERROR] Couldn't initialize GLFW\n";
         return -1;
     }
-
     std::cout << "[INFO] GLFW initialized\n";
 
     // setup GLFW window
@@ -148,17 +149,48 @@ int main(int argc, char *argv[])
     int actualWindowWidth, actualWindowHeight;
     glfwGetWindowSize(window, &actualWindowWidth, &actualWindowHeight);
     glViewport(0, 0, actualWindowWidth, actualWindowHeight);
+    glClearColor(0.12, 0.12, 0.12, 1.0f);
 
-    glClearColor(backgroundR, backgroundG, backgroundB, 1.0f);
+    ma_decoder decoder;
+    ma_decoder_config decoder_config = ma_decoder_config_init(ma_format_f32, 2, device.sampleRate);
+    auto result = ma_decoder_init_file("sine_c3.wav", &decoder_config, &decoder);
+    if (result != MA_SUCCESS)
+        return -1;
+
+    defer { ma_decoder_uninit(&decoder); };
+
+    auto numFrames = ma_decoder_get_length_in_pcm_frames(&decoder);
+    auto numChannels = decoder.internalChannels;
+    std::cout << "Number of frames: " << numFrames << '\n';
+    std::cout << "Number of channels: " << numChannels << '\n';
+
+    std::vector<float> file;
+    file.resize(numFrames * numChannels);
+    std::fill(file.begin(), file.end(), 0.0f);
+    if (numFrames != ma_decoder_read_pcm_frames(&decoder, file.data(), numFrames))
+        std::cout << "Error reading the file!\n";
+
+    std::vector<ImPlotPoint> plot;
+    plot.resize(numFrames);
+    float period = 1 / static_cast<float>(decoder.outputSampleRate);
+    for (int i = 0; i < numFrames; i++) {
+        plot[i].x = i * period;
+        plot[i].y = file[2 * i + 1];
+    }
+
     // --- rendering loop
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    defer { ImGui::DestroyContext(); };
+    ImPlot::CreateContext();
+    defer { ImPlot::DestroyContext(); };
+
     ImGuiIO& io = ImGui::GetIO(); (void)io;
 
+    ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version.c_str());
 
-    bool show_demo_window = true;
     while (!glfwWindowShouldClose(window))
     {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -166,8 +198,43 @@ int main(int argc, char *argv[])
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        // standard demo window
-        if (show_demo_window) { ImGui::ShowDemoWindow(&show_demo_window); }
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight));
+        ImGui::Begin("Main", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
+        if (ImPlot::BeginPlot("Soundfile")) {
+            ImPlot::PlotLine("", &plot[0].x, &plot[0].y, numFrames, 0, sizeof(ImPlotPoint));
+            ImPlot::DragLineX("DragStart", &regionStart);
+            ImPlot::DragLineX("DragStop", &regionEnd);
+            ImPlot::GetPlotDrawList()->AddRectFilled(
+                ImPlot::PlotToPixels(ImPlotPoint(regionStart, ImPlot::GetPlotLimits().Y.Min)),
+                ImPlot::PlotToPixels(ImPlotPoint(regionEnd, ImPlot::GetPlotLimits().Y.Max)),
+                ImGui::GetColorU32(ImVec4(1, 1, 1, 0.25f))
+            );
+            // ImPlot::SetNextLineStyle(ImVec4(1, 1, 1, 1), 2.0f);
+            // ImPlot::PlotVLines("VLine", &linePosition, 1, 0);
+            // if (dragging && !ImGui::IsMouseClicked(0))
+            //     dragging = false;
+
+            // if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(0) && !mouseClicked) {
+            //     auto context = ImPlot::GetCurrentContext();
+            //     if (!dragging) {
+            //         auto point = ImPlot::GetPlotMousePos();
+            //         const float grab_size = 5.0f;
+            //         float yt = context->CurrentPlot->PlotRect.Min.y;
+            //         float yb = context->CurrentPlot->PlotRect.Max.y;
+            //         float x  = std::lround(ImPlot::PlotToPixels(linePosition, 0).x);
+            //         const bool outside = x < (context->CurrentPlot->PlotRect.Min.x - grab_size / 2) || x > (context->CurrentPlot->PlotRect.Max.x + grab_size / 2);
+            //         if (!outside)
+            //             dragging = true;
+            //     }
+
+            //     mouseClicked = true;
+            // }
+
+            ImPlot::EndPlot();
+        }
+        ImGui::End();
 
         // rendering
         ImGui::Render();

@@ -21,7 +21,6 @@ else()
     find_package(PkgConfig REQUIRED) 
     pkg_check_modules(sfizz REQUIRED IMPORTED_TARGET GLOBAL sfizz)
     add_library(sfizz ALIAS PkgConfig::sfizz)
-    message("sfizz flags: ${sfizz_LDFLAGS}")
 endif()
 
 add_library(glad STATIC src/glad.c)
@@ -40,14 +39,20 @@ target_link_libraries(imgui PRIVATE glad glfw)
 target_include_directories(imgui PUBLIC third_party/imgui)
 target_include_directories(imgui PUBLIC third_party/imgui/backends)
 
+add_library(implot STATIC 
+    third_party/implot/implot.cpp
+    third_party/implot/implot_items.cpp
+)
+target_link_libraries(implot PRIVATE imgui)
+target_include_directories(implot PUBLIC third_party/implot)
+
 add_library(miniaudio STATIC 
     third_party/miniaudio/extras/miniaudio_split/miniaudio.c
 )
 target_include_directories(miniaudio PUBLIC third_party/miniaudio/extras/miniaudio_split)
-message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 add_executable(wextract src/main.cpp)
 target_include_directories(wextract PRIVATE include)        
-target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui miniaudio)
+target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui implot miniaudio)
 
 if (UNIX)
     find_package(Threads)
