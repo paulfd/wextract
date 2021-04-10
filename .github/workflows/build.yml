@@ -23,7 +23,7 @@ jobs:
         sudo apt-get update && \
         sudo apt-get install \
           pkg-config \
-          sfizz \
+          libsfizz0-dev \
           libglfw3-dev
 
     - name: Create Build Environment
