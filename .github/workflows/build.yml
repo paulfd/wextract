@@ -1,0 +1,63 @@
+name: build
+
+on:
+  push:
+    branches:
+      - '*'
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build_for_linux:
+    runs-on: ubuntu-18.04
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: recursive
+    - name: Set up dependencies
+      working-directory: ${{runner.workspace}}
+      run: |
+        sudo apt-get update && \
+        sudo apt-get install \
+          pkg-config \
+          wget \
+          libglfw3-dev
+        wget https://github.com/sfztools/sfizz/releases/download/0.5.1/sfizz-0.5.1-linux-amd64.tar.gz
+        sudo tar xzf sfizz-0.5.1-linux-amd64.tar.gz -C /
+    - name: Create Build Environment
+      shell: bash
+      working-directory: ${{runner.workspace}}
+      run: cmake -E make_directory build
+    - name: Configure CMake
+      shell: bash
+      working-directory: ${{runner.workspace}}/build
+      run: |
+        cmake "$GITHUB_WORKSPACE" -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+    - name: Build
+      shell: bash
+      working-directory: ${{runner.workspace}}/build
+      run: cmake --build . --config "$BUILD_TYPE" -j 2
+
+  build_for_win64:
+    runs-on: windows-2019
+    steps:
+    - name: Set install name
+      run: |
+        echo platform=x64 >> "${Env:GITHUB_ENV}"
+        echo release_arch=x64 >> "${Env:GITHUB_ENV}"
+        echo "install_ref=$(${Env:GITHUB_REF}.split('/')[-1])" >> "${Env:GITHUB_ENV}"
+        echo "install_name=sfizz-$(${Env:GITHUB_REF}.split('/')[-1])-win64" >> "${Env:GITHUB_ENV}"
+    - uses: actions/checkout@v2
+      with:
+        submodules: recursive
+    - name: Create Build Environment
+      working-directory: ${{runner.workspace}}
+      run: cmake -E make_directory build
+    - name: Configure CMake
+      working-directory: ${{runner.workspace}}/build
+      run: |
+       cmake "${Env:GITHUB_WORKSPACE}" -G"Visual Studio 16 2019" -A"${Env:release_arch}" -DCMAKE_BUILD_TYPE="${Env:BUILD_TYPE}"
+    - name: Build
+      working-directory: ${{runner.workspace}}/build
+      run: cmake --build . --config "${Env:BUILD_TYPE}" -j 2
