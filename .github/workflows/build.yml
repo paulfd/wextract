@@ -23,12 +23,14 @@ jobs:
           pkg-config \
           wget \
           libglfw3-dev
-        wget https://github.com/sfztools/sfizz/releases/download/0.5.1/sfizz-0.5.1-linux-amd64.tar.gz
+        wget --quiet https://github.com/sfztools/sfizz/releases/download/0.5.1/sfizz-0.5.1-linux-amd64.tar.gz
         sudo tar xzf sfizz-0.5.1-linux-amd64.tar.gz -C /
     - name: Create Build Environment
       shell: bash
       working-directory: ${{runner.workspace}}
       run: cmake -E make_directory build
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
     - name: Configure CMake
       shell: bash
       working-directory: ${{runner.workspace}}/build
