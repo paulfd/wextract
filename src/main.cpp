@@ -20,8 +20,15 @@ float windowHeight = 600;
 
 double regionStart = 1.0f;
 double regionEnd = 2.0f;
-bool mouseClicked = false;
-bool dragging = false;
+struct NamedPlotPoint
+{
+    NamedPlotPoint(double x, double y, std::string name)
+    : x(x), y(y), name(std::move(name)) {}
+    double x, y;
+    std::string name;
+};
+std::vector<NamedPlotPoint> points;
+unsigned pointCounter { 0 };
 
 constexpr ma_uint32 blockSize { 256 };
 
@@ -185,7 +192,7 @@ int main(int argc, char *argv[])
     ImPlot::CreateContext();
     defer { ImPlot::DestroyContext(); };
 
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGuiIO& io = ImGui::GetIO();
 
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
@@ -211,26 +218,55 @@ int main(int argc, char *argv[])
                 ImPlot::PlotToPixels(ImPlotPoint(regionEnd, ImPlot::GetPlotLimits().Y.Max)),
                 ImGui::GetColorU32(ImVec4(1, 1, 1, 0.25f))
             );
-            // ImPlot::SetNextLineStyle(ImVec4(1, 1, 1, 1), 2.0f);
-            // ImPlot::PlotVLines("VLine", &linePosition, 1, 0);
-            // if (dragging && !ImGui::IsMouseClicked(0))
-            //     dragging = false;
+            
+            auto mousePlotPos = ImPlot::GetPlotMousePos();
+            auto mousePos = ImGui::GetMousePos();
+            if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(0) && io.KeyCtrl) {
+                points.emplace_back(mousePlotPos.x, mousePlotPos.y, std::to_string(pointCounter++));
+            }
 
-            // if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(0) && !mouseClicked) {
-            //     auto context = ImPlot::GetCurrentContext();
-            //     if (!dragging) {
-            //         auto point = ImPlot::GetPlotMousePos();
-            //         const float grab_size = 5.0f;
-            //         float yt = context->CurrentPlot->PlotRect.Min.y;
-            //         float yb = context->CurrentPlot->PlotRect.Max.y;
-            //         float x  = std::lround(ImPlot::PlotToPixels(linePosition, 0).x);
-            //         const bool outside = x < (context->CurrentPlot->PlotRect.Min.x - grab_size / 2) || x > (context->CurrentPlot->PlotRect.Max.x + grab_size / 2);
-            //         if (!outside)
-            //             dragging = true;
-            //     }
+            // std::sort(points.begin(), points.end(), [] (NamedPlotPoint& lhs, NamedPlotPoint& rhs) {
+            //     return lhs.x < rhs.x;
+            // });
 
-            //     mouseClicked = true;
-            // }
+            const ImVec4 color = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+            const ImU32 col32 = ImGui::ColorConvertFloat4ToU32(color);
+            auto it = points.begin();
+            while (it != points.end()) {
+                NamedPlotPoint& p = *it;
+                p.y = std::max(0.0, p.y);
+                ImPlot::DragPoint(p.name.c_str(), &p.x, &p.y, false);
+
+                if ((ImGui::IsItemHovered() || ImGui::IsItemActive()) && ImGui::IsMouseDoubleClicked(0)) {
+                    it = points.erase(it);
+                    continue;
+                }
+                const ImVec2 pos = ImPlot::PlotToPixels(p.x, p.y);
+
+                if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+                    ImPlotContext& gp = *ImPlot::GetCurrentContext();
+                    gp.CurrentPlot->PlotHovered = false;
+                    ImVec2 label_pos = pos + 
+                        ImVec2(16 * GImGui->Style.MouseCursorScale, 8 * GImGui->Style.MouseCursorScale);
+                    char buff1[32];
+                    char buff2[32];
+                    ImPlot::LabelAxisValue(gp.CurrentPlot->XAxis, gp.XTicks, p.x, buff1, 32);
+                    ImPlot::LabelAxisValue(gp.CurrentPlot->YAxis[0], gp.YTicks[0], p.y, buff2, 32);
+                    gp.Annotations.Append(label_pos, ImVec2(0.0001f,0.00001f), col32, ImPlot::CalcTextColor(color), 
+                        true, "%s,%s", buff1, buff2);
+                }
+                ++it;
+            }
+
+            if (points.size() > 1) {
+                for (unsigned i = 0, end = points.size() - 1; i < end; ++i) {
+                    ImPlot::GetPlotDrawList()->AddLine(
+                        ImPlot::PlotToPixels(points[i].x, points[i].y),
+                        ImPlot::PlotToPixels(points[i + 1].x, points[i + 1].y),
+                        col32
+                    );
+                }
+            }
 
             ImPlot::EndPlot();
         }
