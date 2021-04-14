@@ -1,3 +1,4 @@
+#define NOMINMAX
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <string>
@@ -5,7 +6,7 @@
 #include <algorithm>
 #include <iostream>
 #include <atomic>
-#include "ghc/filesystem.hpp"
+#include "ghc/fs_std.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include "implot_internal.h"
@@ -14,8 +15,6 @@
 #include "sfizz.hpp"
 #include "defer.h"
 #include "miniaudio.h"
-
-namespace fs = ghc::filesystem;
 
 std::string programName = "wextract";
 
@@ -165,8 +164,10 @@ int main(int argc, char *argv[])
     ma_decoder decoder;
     ma_decoder_config decoder_config = ma_decoder_config_init(ma_format_f32, 2, device.sampleRate);
     auto result = ma_decoder_init_file("sine_c3.wav", &decoder_config, &decoder);
-    if (result != MA_SUCCESS)
+    if (result != MA_SUCCESS){
+        std::cout << "Could not open sound file\n";
         return -1;
+    }
 
     defer { ma_decoder_uninit(&decoder); };
 
@@ -181,7 +182,8 @@ int main(int argc, char *argv[])
     if (numFrames != ma_decoder_read_pcm_frames(&decoder, file.data(), numFrames))
         std::cout << "Error reading the file!\n";
 
-    synth.loadSfzString(fs::current_path() / "base.sfz", "<region> sample=sine_c3.wav loop_mode=one_shot key=60");
+    const auto sfzPath = fs::current_path() / "base.sfz";
+    synth.loadSfzString(sfzPath.string(), "<region> sample=sine_c3.wav loop_mode=one_shot key=60");
     std::vector<ImPlotPoint> plot;
     plot.resize(numFrames);
     float period = 1 / static_cast<float>(decoder.outputSampleRate);
