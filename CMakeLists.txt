@@ -49,10 +49,13 @@ target_include_directories(implot PUBLIC third_party/implot)
 add_library(miniaudio STATIC 
     third_party/miniaudio/extras/miniaudio_split/miniaudio.c
 )
+
+add_library(filesystem INTERFACE)
+target_include_directories(filesystem INTERFACE third_party/filesystem/include)
 target_include_directories(miniaudio PUBLIC third_party/miniaudio/extras/miniaudio_split)
 add_executable(wextract src/main.cpp)
 target_include_directories(wextract PRIVATE include)        
-target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui implot miniaudio)
+target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui implot miniaudio filesystem)
 
 if (UNIX)
     find_package(Threads)

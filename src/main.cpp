@@ -4,6 +4,8 @@
 #include <array>
 #include <algorithm>
 #include <iostream>
+#include <atomic>
+#include "ghc/filesystem.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include "implot_internal.h"
@@ -13,10 +15,14 @@
 #include "defer.h"
 #include "miniaudio.h"
 
+namespace fs = ghc::filesystem;
+
 std::string programName = "wextract";
 
 float windowWidth = 800;
 float windowHeight = 600;
+
+std::atomic_flag playFile;
 
 double regionStart = 1.0f;
 double regionEnd = 2.0f;
@@ -63,17 +69,15 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
         frameCount -= frames;
     }
 
-    if (framesSinceNoteOn > pDevice->sampleRate) {
+    if (!playFile.test_and_set())
         synth->noteOn(0, 60, 127);
-        framesSinceNoteOn = 0;
-    }
 }
 
 int main(int argc, char *argv[])
 {
     sfz::Sfizz synth;
     synth.setSamplesPerBlock(blockSize);
-    synth.loadSfzString("", "<region> sample=*sine loop_mode=one_shot ampeg_attack=0.03 ampeg_release=1");
+    // synth.loadSfzString("", "<region> sample=*sine loop_mode=one_shot ampeg_attack=0.03 ampeg_release=1");
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
     config.playback.format   = ma_format_f32;   
     config.playback.channels = 0;               // Set to 0 to use the device's native channel count.
@@ -177,6 +181,7 @@ int main(int argc, char *argv[])
     if (numFrames != ma_decoder_read_pcm_frames(&decoder, file.data(), numFrames))
         std::cout << "Error reading the file!\n";
 
+    synth.loadSfzString(fs::current_path() / "base.sfz", "<region> sample=sine_c3.wav loop_mode=one_shot key=60");
     std::vector<ImPlotPoint> plot;
     plot.resize(numFrames);
     float period = 1 / static_cast<float>(decoder.outputSampleRate);
@@ -209,6 +214,7 @@ int main(int argc, char *argv[])
         ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight));
         ImGui::Begin("Main", nullptr,
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
+        ImGui::BeginChild("Plot", ImVec2(windowWidth - 150.0f, 0.0f));
         if (ImPlot::BeginPlot("Soundfile")) {
             ImPlot::PlotLine("", &plot[0].x, &plot[0].y, numFrames, 0, sizeof(ImPlotPoint));
             ImPlot::DragLineX("DragStart", &regionStart);
@@ -225,9 +231,9 @@ int main(int argc, char *argv[])
                 points.emplace_back(mousePlotPos.x, mousePlotPos.y, std::to_string(pointCounter++));
             }
 
-            // std::sort(points.begin(), points.end(), [] (NamedPlotPoint& lhs, NamedPlotPoint& rhs) {
-            //     return lhs.x < rhs.x;
-            // });
+            std::sort(points.begin(), points.end(), [] (NamedPlotPoint& lhs, NamedPlotPoint& rhs) {
+                return lhs.x < rhs.x;
+            });
 
             const ImVec4 color = ImGui::GetStyleColorVec4(ImGuiCol_Text);
             const ImU32 col32 = ImGui::ColorConvertFloat4ToU32(color);
@@ -237,13 +243,13 @@ int main(int argc, char *argv[])
                 p.y = std::max(0.0, p.y);
                 ImPlot::DragPoint(p.name.c_str(), &p.x, &p.y, false);
 
-                if ((ImGui::IsItemHovered() || ImGui::IsItemActive()) && ImGui::IsMouseDoubleClicked(0)) {
-                    it = points.erase(it);
-                    continue;
-                }
-                const ImVec2 pos = ImPlot::PlotToPixels(p.x, p.y);
+                if (ImGui::IsItemHovered() || ImGui::IsItemActive()) { 
+                    if (ImGui::IsMouseDoubleClicked(0)) {
+                        it = points.erase(it);
+                        continue;
+                    }
 
-                if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+                    const ImVec2 pos = ImPlot::PlotToPixels(p.x, p.y);
                     ImPlotContext& gp = *ImPlot::GetCurrentContext();
                     gp.CurrentPlot->PlotHovered = false;
                     ImVec2 label_pos = pos + 
@@ -270,6 +276,13 @@ int main(int argc, char *argv[])
 
             ImPlot::EndPlot();
         }
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("Buttons", ImVec2(150.0f, 0.0f));
+        if (ImGui::Button("Play"))
+            playFile.clear();
+
+        ImGui::EndChild();
         ImGui::End();
 
         // rendering
