@@ -1,6 +1,6 @@
 project(WavetableExtract)
 cmake_minimum_required(VERSION 3.11)
-set (CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_STANDARD 14)
 
 find_package(OpenGL REQUIRED)
 find_package(glfw3 QUIET)
@@ -14,6 +14,11 @@ endif()
 find_package(fmt QUIET)
 if (NOT fmt_FOUND)
     add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
+endif()
+
+find_package(Eigen3 QUIET)
+if (NOT Eigen3_FOUND)
+    add_subdirectory(third_party/eigen EXCLUDE_FROM_ALL)
 endif()
 
 if (MSVC)
@@ -54,13 +59,20 @@ target_include_directories(implot PUBLIC third_party/implot)
 add_library(miniaudio STATIC 
     third_party/miniaudio/extras/miniaudio_split/miniaudio.c
 )
+target_include_directories(miniaudio PUBLIC third_party/miniaudio/extras/miniaudio_split)
 
 add_library(filesystem INTERFACE)
 target_include_directories(filesystem INTERFACE third_party/filesystem/include)
-target_include_directories(miniaudio PUBLIC third_party/miniaudio/extras/miniaudio_split)
+
 add_executable(wextract src/main.cpp)
 target_include_directories(wextract PRIVATE include)        
-target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui implot miniaudio filesystem fmt::fmt)
+target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui implot miniaudio filesystem fmt::fmt Eigen3::Eigen)
+
+# Disable note:
+# > note: the ABI of passing structure with ‘complex float’ member has changed in GCC 4.4
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(wextract PRIVATE "-Wno-psabi")
+endif()
 
 if (UNIX)
     find_package(Threads)
@@ -69,7 +81,7 @@ endif()
 
 add_custom_command(TARGET wextract POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${PROJECT_SOURCE_DIR}/extras/sine_c3.wav"
+        "${PROJECT_SOURCE_DIR}/extras/montre8_c2.wav"
         $<TARGET_FILE_DIR:wextract>)
 
 if (MSVC)
