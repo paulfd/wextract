@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <iostream>
 #include <atomic>
+#include <mutex>
+#include <fmt/core.h>
 #include "ghc/fs_std.hpp"
 #include "imgui.h"
 #include "implot.h"
@@ -21,10 +23,15 @@ std::string programName = "wextract";
 float windowWidth = 800;
 float windowHeight = 600;
 
+std::mutex callbackLock;
 std::atomic_flag playFile;
+std::atomic_flag playFileOff;
+std::atomic_flag playWave;
+std::atomic_flag playWaveOff;
 
 double regionStart = 1.0f;
 double regionEnd = 2.0f;
+double sustainLevel = 0.0f;
 struct NamedPlotPoint
 {
     NamedPlotPoint(double x, double y, std::string name)
@@ -36,6 +43,52 @@ std::vector<NamedPlotPoint> points;
 unsigned pointCounter { 0 };
 
 constexpr ma_uint32 blockSize { 256 };
+
+static const std::string filename = "sine_c3.wav";
+static const auto sfzPath = fs::current_path() / "base.sfz";
+static const std::string baseSample = "<region> loop_mode=one_shot key=60 ";
+static const std::string baseOutput = "<region> key=61 sample=*sine";
+static std::string eg = "";
+
+static void sortPoints()
+{
+    std::sort(points.begin(), points.end(), [] (NamedPlotPoint& lhs, NamedPlotPoint& rhs) {
+        return lhs.x < rhs.x;
+    });
+}
+
+static void reloadSfzFile(sfz::Sfizz& synth)
+{
+    std::string sfz = fmt::format("<region> loop_mode=one_shot key=60 sample={}"
+        "<region> key=61 sample=*sine ", filename);
+    defer { 
+        std::lock_guard<std::mutex> lock { callbackLock };
+        synth.loadSfzString(sfzPath.string(), sfz);
+    };
+
+    if (points.size() < 2)        
+        return;
+
+    bool nonzeroEnd = points.back().y > 0.0f;
+    eg = "eg01_ampeg=1 ";
+    if (nonzeroEnd)
+        eg += fmt::format("eg01_sustain={}\n", points.size());
+    else
+        eg += "loop_mode=one_shot\n";
+
+    auto start = points[0].x;
+    eg += fmt::format("eg01_time1=0 eg01_level1={:.2f}", points[0].y / sustainLevel);
+    for (unsigned i = 1, n = points.size(); i < n; ++i) {
+        eg += fmt::format("\neg01_time{0}={1:.2f} eg01_level{0}={2:.2f}",
+            i + 1, points[i].x - start, points[i].y / sustainLevel);
+    }
+    if (nonzeroEnd) {
+        eg += fmt::format("\neg01_time{0}={1:.2f} eg01_level{0}={2:.2f}",
+                points.size() + 1, points.back().x - start + 1.0f, 0.0f);
+    }
+    
+    sfz += eg;
+}
 
 static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
@@ -52,11 +105,28 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
     static std::array<std::array<float, blockSize>, 2> buffers;
     static ma_uint32 framesSinceNoteOn = 0;
 
+    std::unique_lock<std::mutex> lock { callbackLock, std::try_to_lock };
+    if (!lock.owns_lock())
+        return;
+
     float* audioBuffer[2] { buffers[0].data(), buffers[1].data() };
     float* output = reinterpret_cast<float*>(pOutput);
     sfz::Sfizz* synth = reinterpret_cast<sfz::Sfizz*>(pDevice->pUserData);
     ma_uint32 renderIdx { 0 };
     framesSinceNoteOn += frameCount;
+    
+    if (!playFile.test_and_set())
+        synth->noteOn(0, 60, 127);
+
+    if (!playFileOff.test_and_set())
+        synth->noteOff(1, 60, 127);
+
+    if (!playWave.test_and_set())
+        synth->noteOn(0, 61, 127);
+
+    if (!playWaveOff.test_and_set())
+        synth->noteOff(1, 61, 127);
+
     while (frameCount > 0) {
         ma_uint32 frames = std::min(frameCount, blockSize);
         synth->renderBlock(audioBuffer, frames);
@@ -67,9 +137,6 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
         renderIdx += 2 * frames;
         frameCount -= frames;
     }
-
-    if (!playFile.test_and_set())
-        synth->noteOn(0, 60, 127);
 }
 
 int main(int argc, char *argv[])
@@ -163,13 +230,13 @@ int main(int argc, char *argv[])
 
     ma_decoder decoder;
     ma_decoder_config decoder_config = ma_decoder_config_init(ma_format_f32, 2, device.sampleRate);
-    auto result = ma_decoder_init_file("sine_c3.wav", &decoder_config, &decoder);
+    auto result = ma_decoder_init_file(filename.c_str(), &decoder_config, &decoder);
     if (result != MA_SUCCESS){
         std::cout << "Could not open sound file\n";
         return -1;
     }
-
     defer { ma_decoder_uninit(&decoder); };
+    reloadSfzFile(synth);
 
     auto numFrames = ma_decoder_get_length_in_pcm_frames(&decoder);
     auto numChannels = decoder.internalChannels;
@@ -182,14 +249,13 @@ int main(int argc, char *argv[])
     if (numFrames != ma_decoder_read_pcm_frames(&decoder, file.data(), numFrames))
         std::cout << "Error reading the file!\n";
 
-    const auto sfzPath = fs::current_path() / "base.sfz";
-    synth.loadSfzString(sfzPath.string(), "<region> sample=sine_c3.wav loop_mode=one_shot key=60");
     std::vector<ImPlotPoint> plot;
     plot.resize(numFrames);
     float period = 1 / static_cast<float>(decoder.outputSampleRate);
     for (int i = 0; i < numFrames; i++) {
         plot[i].x = i * period;
         plot[i].y = file[2 * i + 1];
+        sustainLevel = std::max(plot[i].y, sustainLevel);
     }
 
     // --- rendering loop
@@ -216,11 +282,12 @@ int main(int argc, char *argv[])
         ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight));
         ImGui::Begin("Main", nullptr,
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
-        ImGui::BeginChild("Plot", ImVec2(windowWidth - 150.0f, 0.0f));
+        ImGui::BeginChild("Plot", ImVec2(windowWidth - 150.0f, 300.0f));
         if (ImPlot::BeginPlot("Soundfile")) {
             ImPlot::PlotLine("", &plot[0].x, &plot[0].y, numFrames, 0, sizeof(ImPlotPoint));
             ImPlot::DragLineX("DragStart", &regionStart);
             ImPlot::DragLineX("DragStop", &regionEnd);
+            ImPlot::DragLineY("SustainLevel", &sustainLevel, true, ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight));
             ImPlot::GetPlotDrawList()->AddRectFilled(
                 ImPlot::PlotToPixels(ImPlotPoint(regionStart, ImPlot::GetPlotLimits().Y.Min)),
                 ImPlot::PlotToPixels(ImPlotPoint(regionEnd, ImPlot::GetPlotLimits().Y.Max)),
@@ -231,25 +298,29 @@ int main(int argc, char *argv[])
             auto mousePos = ImGui::GetMousePos();
             if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(0) && io.KeyCtrl) {
                 points.emplace_back(mousePlotPos.x, mousePlotPos.y, std::to_string(pointCounter++));
+                sortPoints();
             }
 
-            std::sort(points.begin(), points.end(), [] (NamedPlotPoint& lhs, NamedPlotPoint& rhs) {
-                return lhs.x < rhs.x;
-            });
+            if (ImGui::IsMouseReleased(0))
+                reloadSfzFile(synth);
 
             const ImVec4 color = ImGui::GetStyleColorVec4(ImGuiCol_Text);
             const ImU32 col32 = ImGui::ColorConvertFloat4ToU32(color);
             auto it = points.begin();
             while (it != points.end()) {
                 NamedPlotPoint& p = *it;
-                p.y = std::max(0.0, p.y);
                 ImPlot::DragPoint(p.name.c_str(), &p.x, &p.y, false);
-
+                p.y = std::max(0.0, p.y);
+                
                 if (ImGui::IsItemHovered() || ImGui::IsItemActive()) { 
                     if (ImGui::IsMouseDoubleClicked(0)) {
                         it = points.erase(it);
+                        reloadSfzFile(synth);
                         continue;
                     }
+
+                    if (ImGui::IsMouseDragging(0)) 
+                        sortPoints();
 
                     const ImVec2 pos = ImPlot::PlotToPixels(p.x, p.y);
                     ImPlotContext& gp = *ImPlot::GetCurrentContext();
@@ -280,11 +351,26 @@ int main(int argc, char *argv[])
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("Buttons", ImVec2(150.0f, 0.0f));
-        if (ImGui::Button("Play"))
+        ImGui::BeginChild("Buttons", ImVec2(150.0f, 300.0f));
+
+        ImGui::Button("Play");
+        if (ImGui::IsItemActive() && ImGui::IsMouseClicked(0))
             playFile.clear();
+        
+        if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
+            playFileOff.clear();
+
+        ImGui::Button("Play Wave");
+        if (ImGui::IsItemActive() && ImGui::IsMouseClicked(0))
+            playWave.clear();
+        
+        if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
+            playWaveOff.clear();
 
         ImGui::EndChild();
+
+        ImGui::InputTextMultiline("##source", const_cast<char*>(eg.c_str()), eg.size(), 
+            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 12), ImGuiInputTextFlags_ReadOnly);
         ImGui::End();
 
         // rendering

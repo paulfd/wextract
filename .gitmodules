@@ -16,3 +16,6 @@
 [submodule "third_party/filesystem"]
 	path = third_party/filesystem
 	url = https://github.com/gulrak/filesystem.git
+[submodule "third_party/fmt"]
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt.git
