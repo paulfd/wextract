@@ -41,10 +41,11 @@ std::atomic_flag playWave;
 std::atomic_flag playWaveOff;
 std::atomic_flag closeComputationModal;
 std::atomic_flag updateWavetable;
+std::atomic_flag reloadSfz;
 
 double regionStart = 0.65f;
 double regionEnd = 1.0f;
-double sustainLevel = 0.0f;
+double sustainLevel = 0.5f;
 
 using HarmonicVector = std::vector<std::pair<float, std::complex<float>>>;
 HarmonicVector harmonics;
@@ -63,9 +64,10 @@ unsigned pointCounter { 0 };
 constexpr ma_uint32 blockSize { 256 };
 
 static const std::string filename = "montre8_c2.wav";
+static std::string tableFilename = "";
 static const auto sfzPath = fs::current_path() / "base.sfz";
 static const std::string baseSample = "<region> loop_mode=one_shot key=60 ";
-static const std::string baseOutput = "<region> key=61 sample=*sine";
+static const std::string baseOutput = "<region> key=36 sample=*sine";
 static std::string eg = "";
 
 static void sortPoints()
@@ -78,11 +80,16 @@ static void sortPoints()
 static void reloadSfzFile(sfz::Sfizz& synth)
 {
     std::string sfz = fmt::format("<region> loop_mode=one_shot key=60 sample={}\n"
-        "<region> key=61 sample=*sine\n", filename);
+        "<region> key=36 ", filename);
     defer { 
         std::lock_guard<std::mutex> lock { callbackLock };
         synth.loadSfzString(sfzPath.string(), sfz);
     };
+
+    if (!tableFilename.empty())
+        sfz += fmt::format("oscillator=on sample={}\n", tableFilename);
+    else
+        sfz += "sample=*sine\n";
 
     if (points.size() < 2)        
         return;
@@ -157,12 +164,7 @@ static std::vector<float> buildWavetable(const HarmonicVector& harmonics, int si
     using RowArrayXd = Array<double, 1, Dynamic>;
     ArrayXd time = ArrayXd::LinSpaced(size, 0, static_cast<double>(size - 1));
     time /= static_cast<double>(size);
-    ArrayXd mappedTable = Map<ArrayXd>(table.data(), table.size());
-    std::cout << "Mapped:\n" << mappedTable.head(3) << "\n";
-    std::cout << "Table:\n" << table[0] << " " << table[1] << " " << table[2] << " " << "\n";
-    table[0] = 1.0;
-    std::cout << "Mapped:\n" << mappedTable.head(3) << "\n";
-    std::cout << "Table:\n" << table[0] << " " << table[1] << " " << table[2] << " " << "\n";
+    Map<ArrayXd> mappedTable { table.data(), table.size() };
 
     for (const auto& [f, h] : harmonics) {
         double freqIndex = std::round(f / harmonics.front().first);
@@ -171,12 +173,6 @@ static std::vector<float> buildWavetable(const HarmonicVector& harmonics, int si
         // fmt::print("Harmonic at {:.2f} ({}) Hz: {:.3f} exp (i pi {:.3f})\n", f, freqIndex, magnitude, phase);
         mappedTable += magnitude * (2.0 * pi<double> * freqIndex * time + phase).sin();
     }
-    std::cout << "Mapped:\n" << mappedTable.head(3) << "\n";
-    std::cout << "Table:\n" << table[0] << " " << table[1] << " " << table[2] << " " << "\n";
-
-    for (auto t: table)
-        fmt::print("{} ", t);
-    fmt::print("\n");
 
     if (normalizePower) {
         double squaredNorm = std::accumulate(harmonics.begin(), harmonics.end(), 0.0, 
@@ -184,6 +180,19 @@ static std::vector<float> buildWavetable(const HarmonicVector& harmonics, int si
         double norm = std::sqrt(squaredNorm);
         mappedTable /= norm;
     }
+
+    size_t zeroIndex = 0;
+    double zeroValue = mappedTable.maxCoeff();
+    for (int i = 0; i < size; ++i) {
+        double absValue = std::abs(mappedTable[i]);
+        if (absValue < zeroValue) {
+            zeroIndex = i;
+            zeroValue = absValue;
+        }
+    }
+    ArrayXd head = mappedTable.head(zeroIndex);
+    ArrayXd tail = mappedTable.tail(size - zeroIndex);
+    mappedTable << tail, head;
 
     return output;
 }
@@ -238,10 +247,10 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
         synth->noteOff(1, 60, 127);
 
     if (!playWave.test_and_set())
-        synth->noteOn(0, 61, 127);
+        synth->noteOn(0, 36, 127);
 
     if (!playWaveOff.test_and_set())
-        synth->noteOff(1, 61, 127);
+        synth->noteOff(1, 36, 127);
 
     while (frameCount > 0) {
         ma_uint32 frames = std::min(frameCount, blockSize);
@@ -262,6 +271,7 @@ int main(int argc, char *argv[])
     playWave.test_and_set();
     playWaveOff.test_and_set();
     closeComputationModal.test_and_set();
+    reloadSfz.test_and_set();
     updateWavetable.test_and_set();
 
     sfz::Sfizz synth;
@@ -379,7 +389,7 @@ int main(int argc, char *argv[])
     for (int i = 0; i < numFrames; i++) {
         plot[i].x = i * period;
         plot[i].y = file[2 * i + 1];
-        sustainLevel = std::max(plot[i].y, sustainLevel);
+        sustainLevel = std::max(std::abs(plot[i].y), sustainLevel);
     }
     std::vector<ImPlotPoint> tablePlot;
     double tablePeriod = 1.0 / static_cast<double>(tableSize);
@@ -406,6 +416,9 @@ int main(int argc, char *argv[])
     {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        if (!reloadSfz.test_and_set())
+            reloadSfzFile(synth);
+
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -415,14 +428,16 @@ int main(int argc, char *argv[])
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
             
         ImGui::BeginChild("Plot", ImVec2(windowWidth - 150.0f, 300.0f));
-        if (ImPlot::BeginPlot("Soundfile")) {
+        ImPlot::SetNextPlotLimitsY(-sustainLevel + 0.1f, sustainLevel + 0.1f);
+        if (ImPlot::BeginPlot("Soundfile", "time (seconds)", nullptr,
+            ImVec2(-1, 0), 0, 0, ImPlotAxisFlags_Lock)) {
             ImPlot::PlotLine("", &plot[0].x, &plot[0].y, static_cast<int>(numFrames), 0, sizeof(ImPlotPoint));
             ImPlot::DragLineX("DragStart", &regionStart);
             ImPlot::DragLineX("DragStop", &regionEnd);
             ImPlot::DragLineY("SustainLevel", &sustainLevel, true, 
                 ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight));
             if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0)) 
-                reloadSfzFile(synth);
+                reloadSfz.clear();
 
             ImPlot::GetPlotDrawList()->AddRectFilled(
                 ImPlot::PlotToPixels(ImPlotPoint(regionStart, ImPlot::GetPlotLimits().Y.Min)),
@@ -448,7 +463,7 @@ int main(int argc, char *argv[])
                 if (ImGui::IsItemHovered() || ImGui::IsItemActive()) { 
                     if (ImGui::IsMouseDoubleClicked(0)) {
                         it = points.erase(it);
-                        reloadSfzFile(synth);
+                        reloadSfz.clear();
                         continue;
                     }
 
@@ -456,7 +471,7 @@ int main(int argc, char *argv[])
                         sortPoints();
 
                     if (ImGui::IsMouseReleased(0)) 
-                        reloadSfzFile(synth);
+                        reloadSfz.clear();
 
                     const ImVec2 pos = ImPlot::PlotToPixels(p.x, p.y);
                     ImPlotContext& gp = *ImPlot::GetCurrentContext();
@@ -526,7 +541,7 @@ int main(int argc, char *argv[])
                 auto signal = extractSignalRange(file.data(), regionStart, regionEnd, period);
                 float sampleRate = 1.0f / static_cast<float>(period);
                 float rootFrequency = 65.0f;
-                float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * 4);
+                float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * 16);
 
                 float searchFrequency = 0.0f;
                 while (searchFrequency < frequencyLimit) {
@@ -540,8 +555,25 @@ int main(int argc, char *argv[])
                 }
 
                 wavetable = buildWavetable(harmonics, tableSize);
+
+
                 closeComputationModal.clear();
                 updateWavetable.clear();
+                ma_encoder encoder;
+                ma_encoder_config config = 
+                    ma_encoder_config_init(ma_resource_format_wav, ma_format_f32, 1, 44100);
+                tableFilename = "table.wav";
+                ma_result result = ma_encoder_init_file(tableFilename.c_str(), &config, &encoder);
+                defer {
+                    ma_encoder_uninit(&encoder);
+                };
+                ma_encoder_write_pcm_frames(&encoder, wavetable.data(), tableSize);
+                if (result != MA_SUCCESS) {
+                    std::cerr << "Error writing down table file";
+                    tableFilename = "";
+                }
+
+                reloadSfz.clear();                
             }).detach();
         }
         
@@ -561,7 +593,9 @@ int main(int argc, char *argv[])
         ImGui::InputTextMultiline("##source", const_cast<char*>(eg.c_str()), eg.size(), 
             ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 10), ImGuiInputTextFlags_ReadOnly);
         
-        if (ImPlot::BeginPlot("Wavetable")) {
+        ImPlot::SetNextPlotLimitsX(0.0, 1.0);
+        if (ImPlot::BeginPlot("Wavetable", "Period", nullptr,
+            ImVec2(-1, 0), 0, ImPlotAxisFlags_Lock, ImPlotAxisFlags_AutoFit)) {
             if (!updateWavetable.test_and_set()) {
                 for (int i = 0; i < tableSize; i++)
                     tablePlot[i].y = wavetable[i];
