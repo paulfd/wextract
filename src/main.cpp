@@ -25,6 +25,8 @@ using namespace std::complex_literals;
 
 std::string programName = "wextract";
 
+constexpr float pi = 3.14159265358979323846f;
+
 float windowWidth = 800;
 float windowHeight = 600;
 
@@ -84,7 +86,7 @@ static void reloadSfzFile(sfz::Sfizz& synth)
 
     auto start = points[0].x;
     eg += fmt::format("eg01_time1=0 eg01_level1={:.2f}", points[0].y / sustainLevel);
-    for (unsigned i = 1, n = points.size(); i < n; ++i) {
+    for (size_t i = 1, n = points.size(); i < n; ++i) {
         eg += fmt::format("\neg01_time{0}={1:.2f} eg01_level{0}={2:.2f}",
             i + 1, points[i].x - start, points[i].y / sustainLevel);
     }
@@ -96,7 +98,7 @@ static void reloadSfzFile(sfz::Sfizz& synth)
     sfz += eg;
 }
 
-static std::pair<float, std::complex<float>> frequencyPeakSearch(float* signal, int size, float coarseFrequency, 
+static std::pair<float, std::complex<float>> frequencyPeakSearch(float* signal, size_t size, float coarseFrequency, 
     float sampleRate, float centsRange = 50, int pointsPerCents=100)
 {
     using namespace Eigen;
@@ -104,10 +106,13 @@ static std::pair<float, std::complex<float>> frequencyPeakSearch(float* signal, 
     VectorXf freq = VectorXf::LinSpaced(2 * pointsPerCents, 
         logFreq - centsRange / 1200, logFreq + centsRange / 1200);
     freq = pow(2.0f, freq.array());
-    VectorXf time = VectorXf::LinSpaced(size, 0, size - 1) / sampleRate;
+    VectorXf time = VectorXf::LinSpaced(size, 0, static_cast<float>(size - 1)) / sampleRate;
+
+    fmt::print("Frequency range around {:.2f}: [{:.2f}, {:.2f}] Hz\n", 
+        coarseFrequency, freq.minCoeff(), freq.maxCoeff());
 
     MatrixXcf projectionMatrix = 
-        exp(2.0if * float(M_PI) * (freq * time.transpose()).array());
+        exp(2.0if * pi * (freq * time.transpose()).array());
     VectorXcf projected = projectionMatrix * Map<VectorXf>(signal, size);
 
     unsigned maxIdx = 0;
@@ -122,6 +127,27 @@ static std::pair<float, std::complex<float>> frequencyPeakSearch(float* signal, 
     }
 
     return std::make_pair(freq[maxIdx], projected[maxIdx]);
+}
+
+static std::vector<float> extractSignalRange(const float* source, double regionStart, double regionEnd, 
+    double samplePeriod, int stride=2, int offset=1)
+{
+    std::vector<float> signal;
+
+    if (regionStart > regionEnd)
+        std::swap(regionStart, regionEnd);
+
+    int rangeStart = static_cast<int>(regionStart / samplePeriod);
+    int rangeEnd = static_cast<int>(regionEnd / samplePeriod);
+    int rangeSize = rangeEnd - rangeStart;
+    if (rangeSize == 0)
+        return signal;
+        
+    signal.resize(rangeSize);
+    for (int t = 0, s = rangeStart; s < rangeEnd; ++t, ++s)
+        signal[t] = source[stride * s + offset];
+    
+    return signal;
 }
 
 static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
@@ -189,7 +215,7 @@ int main(int argc, char *argv[])
         std::cerr << "[ERROR] Failed to initialize device\n";
         return -1;
     }
-    synth.setSampleRate(device.sampleRate);
+    synth.setSampleRate(static_cast<float>(device.sampleRate));
     ma_device_start(&device);
     
     std::cout << "Backend: " << ma_get_backend_name(device.pContext->backend) << '\n';
@@ -226,7 +252,8 @@ int main(int argc, char *argv[])
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 #endif
 
-    GLFWwindow *window = glfwCreateWindow(windowWidth, windowHeight, 
+    GLFWwindow *window = glfwCreateWindow(
+        static_cast<int>(windowWidth), static_cast<int>(windowHeight), 
         programName.c_str(), NULL, NULL);
     defer { 
         glfwDestroyWindow(window);
@@ -257,7 +284,7 @@ int main(int argc, char *argv[])
     int actualWindowWidth, actualWindowHeight;
     glfwGetWindowSize(window, &actualWindowWidth, &actualWindowHeight);
     glViewport(0, 0, actualWindowWidth, actualWindowHeight);
-    glClearColor(0.12, 0.12, 0.12, 1.0f);
+    glClearColor(0.12f, 0.12f, 0.12f, 1.0f);
 
     ma_decoder decoder;
     ma_decoder_config decoder_config = ma_decoder_config_init(ma_format_f32, 2, device.sampleRate);
@@ -282,7 +309,7 @@ int main(int argc, char *argv[])
 
     std::vector<ImPlotPoint> plot;
     plot.resize(numFrames);
-    float period = 1 / static_cast<float>(decoder.outputSampleRate);
+    double period = 1 / static_cast<double>(decoder.outputSampleRate);
     for (int i = 0; i < numFrames; i++) {
         plot[i].x = i * period;
         plot[i].y = file[2 * i + 1];
@@ -315,7 +342,7 @@ int main(int argc, char *argv[])
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
         ImGui::BeginChild("Plot", ImVec2(windowWidth - 150.0f, 300.0f));
         if (ImPlot::BeginPlot("Soundfile")) {
-            ImPlot::PlotLine("", &plot[0].x, &plot[0].y, numFrames, 0, sizeof(ImPlotPoint));
+            ImPlot::PlotLine("", &plot[0].x, &plot[0].y, static_cast<int>(numFrames), 0, sizeof(ImPlotPoint));
             ImPlot::DragLineX("DragStart", &regionStart);
             ImPlot::DragLineX("DragStop", &regionEnd);
             ImPlot::DragLineY("SustainLevel", &sustainLevel, true, 
@@ -373,7 +400,7 @@ int main(int argc, char *argv[])
             }
 
             if (points.size() > 1) {
-                for (unsigned i = 0, end = points.size() - 1; i < end; ++i) {
+                for (size_t i = 0, end = points.size() - 1; i < end; ++i) {
                     ImPlot::GetPlotDrawList()->AddLine(
                         ImPlot::PlotToPixels(points[i].x, points[i].y),
                         ImPlot::PlotToPixels(points[i + 1].x, points[i + 1].y),
@@ -404,63 +431,34 @@ int main(int argc, char *argv[])
 
         if (ImGui::Button("Find frequency")) {
             std::thread( [period, file] {
-                float frequency;
-                std::complex<float> maxHarmonic;
-                std::vector<float> signal;
 
-                int rangeStart = static_cast<int>(std::min(regionStart, regionEnd) / period);
-                int rangeEnd = static_cast<int>(std::max(regionStart, regionEnd) / period);
-                int rangeSize = rangeEnd - rangeStart;
-                if (rangeSize == 0)
-                    return;
-                    
-                signal.resize(rangeSize);
-                for (int target = 0, source = rangeStart; source < rangeEnd; ++target, ++source)
-                    signal[target] = file[2 * source + 1];
-
-                float sampleRate = 1.0f / period;
-                std::tie(frequency, maxHarmonic) = 
-                    frequencyPeakSearch(signal.data(), rangeSize, 65.0f, sampleRate);
+                auto signal = extractSignalRange(file.data(), regionStart, regionEnd, period);
+                float sampleRate = 1.0f / static_cast<float>(period);
+                auto [frequency, harmonic] = 
+                    frequencyPeakSearch(signal.data(), signal.size(), 65.0f, sampleRate);
 
                 fmt::print("Frequency: {:.2f} Hz (Harmonic: {} + i{})\n", 
-                    frequency, maxHarmonic.real(), maxHarmonic.imag());
+                    frequency, harmonic.real(), harmonic.imag());
             }).detach();
         }
 
         if (ImGui::Button("Find harmonics")) {
             std::thread( [period, file] {
-                std::vector<float> signal;
-
-                int rangeStart = static_cast<int>(std::min(regionStart, regionEnd) / period);
-                int rangeEnd = static_cast<int>(std::max(regionStart, regionEnd) / period);
-                int rangeSize = rangeEnd - rangeStart;
-                if (rangeSize == 0)
-                    return;
-                    
-                signal.resize(rangeSize);
-                for (int target = 0, source = rangeStart; source < rangeEnd; ++target, ++source)
-                    signal[target] = file[2 * source + 1];
-
-                float sampleRate = 1.0f / period;
+                auto signal = extractSignalRange(file.data(), regionStart, regionEnd, period);
+                float sampleRate = 1.0f / static_cast<float>(period);
                 float rootFrequency = 65.0f;
                 float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * 64);
 
-                float frequency = 0.0f;
-                std::vector<std::complex<float>> harmonics;
-                while (frequency < frequencyLimit) {
-                    frequency += rootFrequency;
-                    
-                    float newFrequency;
-                    std::complex<float> maxHarmonic;
-                    std::tie(newFrequency, maxHarmonic) = 
-                        frequencyPeakSearch(signal.data(), rangeSize, frequency, sampleRate);
-                    // fmt::print("Frequency: {:.2f} Hz (Harmonic: {} + i{})\n", 
-                    //     newFrequency, maxHarmonic.real(), maxHarmonic.imag());
+                float searchFrequency = 0.0f;
+                std::vector<std::pair<float, std::complex<float>>> harmonics;
+                while (searchFrequency < frequencyLimit) {
+                    searchFrequency += rootFrequency;
+                    auto [frequency, harmonic] = 
+                        frequencyPeakSearch(signal.data(), signal.size(), searchFrequency, sampleRate);
 
-                    if (std::abs(frequency - newFrequency) > rootFrequency / 2)
-                        break;
-                    
-                    harmonics.push_back(maxHarmonic);
+                    if (harmonics.empty() 
+                        || std::abs(harmonics.back().first - frequency) > rootFrequency)
+                        harmonics.emplace_back(frequency, harmonic);
                 }
 
                 fmt::print("Found {} harmonics\n", harmonics.size()); 
