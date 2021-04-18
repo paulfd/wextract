@@ -4,6 +4,7 @@
 #include <string>
 #include <array>
 #include <algorithm>
+#include <numeric>
 #include <iostream>
 #include <atomic>
 #include <mutex>
@@ -25,20 +26,29 @@ using namespace std::complex_literals;
 
 std::string programName = "wextract";
 
-constexpr float pi = 3.14159265358979323846f;
+template<class T>
+constexpr T pi = T { 3.14159265358979323846 };
+constexpr int tableSize { 1024 };
 
 float windowWidth = 800;
 float windowHeight = 600;
 
 std::mutex callbackLock;
+
 std::atomic_flag playFile;
 std::atomic_flag playFileOff;
 std::atomic_flag playWave;
 std::atomic_flag playWaveOff;
+std::atomic_flag closeComputationModal;
+std::atomic_flag updateWavetable;
 
 double regionStart = 0.65f;
 double regionEnd = 1.0f;
 double sustainLevel = 0.0f;
+
+using HarmonicVector = std::vector<std::pair<float, std::complex<float>>>;
+HarmonicVector harmonics;
+std::vector<float> wavetable;
 
 struct NamedPlotPoint
 {
@@ -108,11 +118,8 @@ static std::pair<float, std::complex<float>> frequencyPeakSearch(float* signal, 
     freq = pow(2.0f, freq.array());
     VectorXf time = VectorXf::LinSpaced(size, 0, static_cast<float>(size - 1)) / sampleRate;
 
-    fmt::print("Frequency range around {:.2f}: [{:.2f}, {:.2f}] Hz\n", 
-        coarseFrequency, freq.minCoeff(), freq.maxCoeff());
-
     MatrixXcf projectionMatrix = 
-        exp(2.0if * pi * (freq * time.transpose()).array());
+        exp(2.0if * pi<float> * (freq * time.transpose()).array());
     VectorXcf projected = projectionMatrix * Map<VectorXf>(signal, size);
 
     unsigned maxIdx = 0;
@@ -127,6 +134,58 @@ static std::pair<float, std::complex<float>> frequencyPeakSearch(float* signal, 
     }
 
     return std::make_pair(freq[maxIdx], projected[maxIdx]);
+}
+
+static std::vector<float> buildWavetable(const HarmonicVector& harmonics, int size,
+    bool normalizePower = true)
+{
+    using namespace Eigen;
+    
+    std::vector<double> table;
+    std::vector<float> output;
+    table.resize(size);
+    output.reserve(size);
+    std::fill(table.begin(), table.end(), 0.0);
+    defer { 
+        std::transform(table.begin(), table.end(), std::back_inserter(output),
+            [](double x) { return static_cast<float>(x); });
+    };
+
+    if (harmonics.empty())
+        return output;
+
+    using RowArrayXd = Array<double, 1, Dynamic>;
+    ArrayXd time = ArrayXd::LinSpaced(size, 0, static_cast<double>(size - 1));
+    time /= static_cast<double>(size);
+    ArrayXd mappedTable = Map<ArrayXd>(table.data(), table.size());
+    std::cout << "Mapped:\n" << mappedTable.head(3) << "\n";
+    std::cout << "Table:\n" << table[0] << " " << table[1] << " " << table[2] << " " << "\n";
+    table[0] = 1.0;
+    std::cout << "Mapped:\n" << mappedTable.head(3) << "\n";
+    std::cout << "Table:\n" << table[0] << " " << table[1] << " " << table[2] << " " << "\n";
+
+    for (const auto& [f, h] : harmonics) {
+        double freqIndex = std::round(f / harmonics.front().first);
+        double phase = std::arg(h);
+        double magnitude = std::abs(h);
+        // fmt::print("Harmonic at {:.2f} ({}) Hz: {:.3f} exp (i pi {:.3f})\n", f, freqIndex, magnitude, phase);
+        mappedTable += magnitude * (2.0 * pi<double> * freqIndex * time + phase).sin();
+    }
+    std::cout << "Mapped:\n" << mappedTable.head(3) << "\n";
+    std::cout << "Table:\n" << table[0] << " " << table[1] << " " << table[2] << " " << "\n";
+
+    for (auto t: table)
+        fmt::print("{} ", t);
+    fmt::print("\n");
+
+    if (normalizePower) {
+        double squaredNorm = std::accumulate(harmonics.begin(), harmonics.end(), 0.0, 
+            [] (double lhs, const auto& rhs) { return lhs + std::pow(std::abs(rhs.second), 2); });
+        double norm = std::sqrt(squaredNorm);
+        mappedTable /= norm;
+    }
+
+    return output;
 }
 
 static std::vector<float> extractSignalRange(const float* source, double regionStart, double regionEnd, 
@@ -198,6 +257,13 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
 
 int main(int argc, char *argv[])
 {
+    playFile.test_and_set();
+    playFileOff.test_and_set();
+    playWave.test_and_set();
+    playWaveOff.test_and_set();
+    closeComputationModal.test_and_set();
+    updateWavetable.test_and_set();
+
     sfz::Sfizz synth;
     synth.setSamplesPerBlock(blockSize);
     // synth.loadSfzString("", "<region> sample=*sine loop_mode=one_shot ampeg_attack=0.03 ampeg_release=1");
@@ -315,6 +381,13 @@ int main(int argc, char *argv[])
         plot[i].y = file[2 * i + 1];
         sustainLevel = std::max(plot[i].y, sustainLevel);
     }
+    std::vector<ImPlotPoint> tablePlot;
+    double tablePeriod = 1.0 / static_cast<double>(tableSize);
+    tablePlot.resize(tableSize);
+    for (int i = 0; i < tableSize; i++) {
+        tablePlot[i].x = i * tablePeriod;
+        tablePlot[i].y = 0.0;
+    }
 
     // --- rendering loop
     IMGUI_CHECKVERSION();
@@ -340,6 +413,7 @@ int main(int argc, char *argv[])
         ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight));
         ImGui::Begin("Main", nullptr,
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
+            
         ImGui::BeginChild("Plot", ImVec2(windowWidth - 150.0f, 300.0f));
         if (ImPlot::BeginPlot("Soundfile")) {
             ImPlot::PlotLine("", &plot[0].x, &plot[0].y, static_cast<int>(numFrames), 0, sizeof(ImPlotPoint));
@@ -442,15 +516,19 @@ int main(int argc, char *argv[])
             }).detach();
         }
 
+        // ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        // ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
         if (ImGui::Button("Find harmonics")) {
+            ImGui::OpenPopup("Computation");
             std::thread( [period, file] {
+                harmonics.clear();
                 auto signal = extractSignalRange(file.data(), regionStart, regionEnd, period);
                 float sampleRate = 1.0f / static_cast<float>(period);
                 float rootFrequency = 65.0f;
-                float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * 64);
+                float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * 4);
 
                 float searchFrequency = 0.0f;
-                std::vector<std::pair<float, std::complex<float>>> harmonics;
                 while (searchFrequency < frequencyLimit) {
                     searchFrequency += rootFrequency;
                     auto [frequency, harmonic] = 
@@ -461,23 +539,46 @@ int main(int argc, char *argv[])
                         harmonics.emplace_back(frequency, harmonic);
                 }
 
-                fmt::print("Found {} harmonics\n", harmonics.size()); 
-
+                wavetable = buildWavetable(harmonics, tableSize);
+                closeComputationModal.clear();
+                updateWavetable.clear();
             }).detach();
+        }
+        
+        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        if (ImGui::BeginPopupModal("Computation", nullptr, 
+                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize)) {
+            ImGui::Text("Computing wavetables... (%d harmonics)", harmonics.size());
+            if (!closeComputationModal.test_and_set())
+                ImGui::CloseCurrentPopup();
+
+            ImGui::EndPopup();
         }
 
         ImGui::EndChild();
 
         ImGui::InputTextMultiline("##source", const_cast<char*>(eg.c_str()), eg.size(), 
-            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 12), ImGuiInputTextFlags_ReadOnly);
+            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 10), ImGuiInputTextFlags_ReadOnly);
+        
+        if (ImPlot::BeginPlot("Wavetable")) {
+            if (!updateWavetable.test_and_set()) {
+                for (int i = 0; i < tableSize; i++)
+                    tablePlot[i].y = wavetable[i];
+            }
+            ImPlot::PlotLine("R", &tablePlot[0].x, &tablePlot[0].y, tableSize, 0, sizeof(ImPlotPoint));
+            ImPlot::EndPlot();
+        }
+        
         ImGui::End();
+
 
         // rendering
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
-        glfwWaitEvents();
+        glfwPollEvents();
     }
 
     return 0;
