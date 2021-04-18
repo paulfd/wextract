@@ -153,13 +153,12 @@ static std::vector<float> buildWavetable(const HarmonicVector& harmonics, int si
     table.resize(size);
     output.reserve(size);
     std::fill(table.begin(), table.end(), 0.0);
-    defer { 
-        std::transform(table.begin(), table.end(), std::back_inserter(output),
-            [](double x) { return static_cast<float>(x); });
-    };
 
-    if (harmonics.empty())
+    if (harmonics.empty()) {
+        fmt::print("Empty harmonics\n");
+        std::fill_n(std::back_inserter(output), size, 0.0f);
         return output;
+    }
 
     using RowArrayXd = Array<double, 1, Dynamic>;
     ArrayXd time = ArrayXd::LinSpaced(size, 0, static_cast<double>(size - 1));
@@ -194,6 +193,8 @@ static std::vector<float> buildWavetable(const HarmonicVector& harmonics, int si
     ArrayXd tail = mappedTable.tail(size - zeroIndex);
     mappedTable << tail, head;
 
+    std::transform(table.begin(), table.end(), std::back_inserter(output),
+            [](double x) { return static_cast<float>(x); });
     return output;
 }
 
@@ -555,8 +556,6 @@ int main(int argc, char *argv[])
                 }
 
                 wavetable = buildWavetable(harmonics, tableSize);
-
-
                 closeComputationModal.clear();
                 updateWavetable.clear();
                 ma_encoder encoder;
@@ -597,7 +596,7 @@ int main(int argc, char *argv[])
         if (ImPlot::BeginPlot("Wavetable", "Period", nullptr,
             ImVec2(-1, 0), 0, ImPlotAxisFlags_Lock, ImPlotAxisFlags_AutoFit)) {
             if (!updateWavetable.test_and_set()) {
-                for (int i = 0; i < tableSize; i++)
+                for (int i = 0, n = static_cast<int>(wavetable.size()); i < tableSize && i < n; i++)
                     tablePlot[i].y = wavetable[i];
             }
             ImPlot::PlotLine("R", &tablePlot[0].x, &tablePlot[0].y, tableSize, 0, sizeof(ImPlotPoint));
