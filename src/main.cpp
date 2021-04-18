@@ -164,7 +164,7 @@ static std::vector<float> buildWavetable(const HarmonicVector& harmonics, int si
     using RowArrayXd = Array<double, 1, Dynamic>;
     ArrayXd time = ArrayXd::LinSpaced(size, 0, static_cast<double>(size - 1));
     time /= static_cast<double>(size);
-    Map<ArrayXd> mappedTable { table.data(), table.size() };
+    Map<ArrayXd> mappedTable { table.data(), size };
 
     for (const auto& [f, h] : harmonics) {
         double freqIndex = std::round(f / harmonics.front().first);
