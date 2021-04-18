@@ -85,6 +85,11 @@ add_custom_command(TARGET wextract POST_BUILD
         "${PROJECT_SOURCE_DIR}/extras/montre8_c2.wav"
         $<TARGET_FILE_DIR:wextract>)
 
+add_custom_command(TARGET wextract POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/extras/trompette8_c2.wav"
+            $<TARGET_FILE_DIR:wextract>)
+
 if (MSVC)
     add_custom_command(TARGET wextract POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
