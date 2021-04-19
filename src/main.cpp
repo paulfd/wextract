@@ -19,12 +19,14 @@
 #include "sfizz.hpp"
 #include "synth.h"
 #include "helpers.h"
+#include "threadpool.h"
 #include "defer.h"
 #include "miniaudio.h"
 
 std::string programName = "wextract";
 
 constexpr int blockSize { 256 };
+ThreadPool pool { 1 };
 
 float windowWidth { 1000 };
 float windowHeight { 620 };
@@ -48,6 +50,7 @@ double regionStart = 0.65f;
 double regionEnd = 1.0f;
 double sustainLevel = 0.5f;
 int waveNote { 36 };
+float reverb { 10.0f };
 
 int rootNote { 36 };
 int numHarmonics { 16 };
@@ -56,12 +59,15 @@ HarmonicVector harmonics;
 std::vector<float> wavetable;
 
 int offset { 0 };
+double yMax { 0.5 };
+std::atomic_flag resetAxis;
 std::vector<ImPlotPoint> plot;
 std::vector<ImPlotPoint> tablePlot;
 
 std::string tableFilename = "";
 std::string sfzFile = "";
 
+fs::path lastDirectory { fs::current_path() };
 ImGui::FileBrowser openDialog;
 ImGui::FileBrowser saveDialog { ImGuiFileBrowserFlags_EnterNewFilename };
 
@@ -122,15 +128,21 @@ static void rebuildSfzFile()
 static void drawPlot()
 {
     ImGuiIO& io = ImGui::GetIO();
-    ImPlot::SetNextPlotLimitsY(-sustainLevel - 0.1f, sustainLevel + 0.1f);
+    ImPlot::SetNextPlotLimitsY(-yMax - 0.1f, yMax + 0.1f, ImGuiCond_Always);
+    if (!resetAxis.test_and_set()) {
+        float xMax = static_cast<float>(numFrames * samplePeriod);
+        ImPlot::SetNextPlotLimitsX(0.0f, xMax, ImGuiCond_Always);
+    }
+
     if (ImPlot::BeginPlot("Soundfile", "time (seconds)", nullptr,
-            ImVec2(-1, 0), ImPlotFlags_AntiAliased, 0, ImPlotAxisFlags_Lock)) {
+            ImVec2(-1, 0), ImPlotFlags_AntiAliased)) {
         ImPlot::PlotLine("", &plot[0].x, &plot[0].y, 
             static_cast<int>(plot.size()), 0, sizeof(ImPlotPoint));
         ImPlot::DragLineX("DragStart", &regionStart);
         ImPlot::DragLineX("DragStop", &regionEnd);
         ImPlot::DragLineY("SustainLevel", &sustainLevel, true, 
             ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight));
+        sustainLevel = std::max(0.0, sustainLevel);
         if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0)) 
             reloadSfz.clear();
 
@@ -229,11 +241,16 @@ static void updateFilePlot()
     }
 
     plot.resize(numFrames);
+    yMax = 0.0;
     for (int i = 0; i < numFrames; i++) {
         plot[i].x = i * samplePeriod;
         plot[i].y = file[2 * i + offset];
-        sustainLevel = std::max(std::abs(plot[i].y), sustainLevel);
+        yMax = std::max(std::abs(plot[i].y), yMax);
     }
+    regionStart = samplePeriod * numFrames / 2.0;
+    regionEnd = regionStart * 1.2;
+    sustainLevel = yMax * 0.9;
+    resetAxis.clear();
 }
 
 static void updateTablePlot()
@@ -264,12 +281,41 @@ static void drawWaveAndFile()
         ImVec2(-1, plotWidth), ImGuiInputTextFlags_ReadOnly);
 }
 
+static bool saveWavetable(const fs::path& path, const float* wavetable, int size)
+{
+    ma_encoder encoder;
+    ma_encoder_config config = 
+        ma_encoder_config_init(ma_resource_format_wav, ma_format_f32, 1, 44100);
+        
+    std::string tablePath = path.string();
+    ma_result result = ma_encoder_init_file(tablePath.c_str(), &config, &encoder);
+    defer { ma_encoder_uninit(&encoder); };
+    if (result != MA_SUCCESS) {
+        std::cerr << "Error writing down table file" << "\n";
+        return false;
+    }
+
+    auto written = ma_encoder_write_pcm_frames(&encoder, wavetable, size);
+    if (written != size) {
+        std::cerr << "Could not write all frames" << "\n";
+
+        if (fs::exists(path))
+            fs::remove(path);
+        
+        return false;
+    }
+
+    return true;
+}
+
 static void drawButtons()
 {
     const auto padding = ImGui::GetStyle().WindowPadding;
     const auto buttonWidth = ImGui::GetWindowSize().x;
-    if (ImGui::Button("Open file", ImVec2(buttonWidth, 0.0f)))
+    if (ImGui::Button("Open file", ImVec2(buttonWidth, 0.0f))) {
+        openDialog.SetPwd(lastDirectory);
         openDialog.Open();
+    }
 
     if (ImGui::RadioButton("Use left", &offset, 0))
         updateFilePlot();
@@ -291,11 +337,10 @@ static void drawButtons()
     ImGui::InputInt("Table size", &tableSize);
     if (ImGui::Button("Extract table", ImVec2(buttonWidth, 0.0f))) {
         ImGui::OpenPopup("Computation");
-        std::thread( [] {
+        pool.enqueue( [] {
             harmonics.clear();
             auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
                 samplePeriod, numChannels, offset);
-            float sampleRate = 1.0f / static_cast<float>(samplePeriod);
             float rootFrequency = 440.0f * std::pow(2.0, (rootNote - 49) / 12.0);
             float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * numHarmonics);
             float searchFrequency = 0.0f;
@@ -310,25 +355,16 @@ static void drawButtons()
             }
 
             wavetable = buildWavetable(harmonics, tableSize);
-            closeComputationModal.clear();
             updateTablePlot();
-            ma_encoder encoder;
-            ma_encoder_config config = 
-                ma_encoder_config_init(ma_resource_format_wav, ma_format_f32, 1, 44100);
-                
+            closeComputationModal.clear();
+
             tableFilename = "table.wav";
-            std::string tablePath = (synth.getRootDirectory() / tableFilename).string();
-            ma_result result = ma_encoder_init_file(tablePath.c_str(), &config, &encoder);
-            defer { ma_encoder_uninit(&encoder); };
-            
-            ma_encoder_write_pcm_frames(&encoder, wavetable.data(), tableSize);
-            if (result != MA_SUCCESS) {
-                std::cerr << "Error writing down table file" << "\n";
+            if (!saveWavetable(synth.getRootDirectory() / tableFilename, 
+                wavetable.data(), wavetable.size())) {
                 tableFilename = "";
             }
-
             reloadSfz.clear();                
-        }).detach();
+        });
     }
 
 
@@ -346,7 +382,7 @@ static void drawButtons()
         synth.waveOff();
 
     if (ImGui::Button("Save table", ImVec2(buttonWidth, 0.0f))) {
-        saveDialog.SetPwd(synth.getRootDirectory());
+        saveDialog.SetPwd(lastDirectory);
         saveDialog.Open();
     }
 
@@ -535,6 +571,7 @@ int main(int argc, char *argv[])
         if(openDialog.HasSelected())
         {
             auto selected = openDialog.GetSelected();
+            lastDirectory = selected.parent_path();
             synth.setSamplePath(selected);
             filename = selected.filename().string();
             tableFilename = "";
@@ -542,10 +579,10 @@ int main(int argc, char *argv[])
             reloadSfz.clear();
 
             updateTablePlot();
-            std::thread([selected] {
+            pool.enqueue([selected] {
                 readFileSample(selected.string());
                 updateFilePlot();
-            }).detach();
+            });
             openDialog.ClearSelected();
         }
 
@@ -553,14 +590,11 @@ int main(int argc, char *argv[])
         if(saveDialog.HasSelected())
         {
             auto selected = saveDialog.GetSelected();
-            ma_encoder encoder;
-            ma_encoder_config config = 
-                ma_encoder_config_init(ma_resource_format_wav, ma_format_f32, 1, 44100);
-                
-            std::string tablePath = selected.string();
-            ma_result result = ma_encoder_init_file(tablePath.c_str(), &config, &encoder);
-            defer { ma_encoder_uninit(&encoder); };
-            ma_encoder_write_pcm_frames(&encoder, wavetable.data(), tableSize);
+            lastDirectory = selected.parent_path();
+            pool.enqueue([selected] { 
+                saveWavetable(selected, wavetable.data(), wavetable.size());
+            });
+            saveDialog.ClearSelected();
         }
 
         ImGui::End();

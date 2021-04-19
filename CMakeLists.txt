@@ -62,7 +62,7 @@ add_library(miniaudio STATIC
 )
 target_include_directories(miniaudio PUBLIC third_party/miniaudio/extras/miniaudio_split)
 
-add_executable(wextract src/main.cpp src/helpers.cpp)
+add_executable(wextract src/main.cpp src/helpers.cpp src/synth.cpp)
 target_include_directories(wextract PRIVATE include third_party/imgui-filebrowser)        
 target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui implot miniaudio fmt::fmt Eigen3::Eigen)
 
