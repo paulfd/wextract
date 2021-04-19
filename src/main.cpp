@@ -50,7 +50,8 @@ double regionStart = 0.65f;
 double regionEnd = 1.0f;
 double sustainLevel = 0.5f;
 int waveNote { 36 };
-float reverb { 10.0f };
+float reverb { 0.0f };
+float volume { 0.0f };
 
 int rootNote { 36 };
 int numHarmonics { 16 };
@@ -93,8 +94,13 @@ static void sortPoints()
 static void rebuildSfzFile()
 {
     sfzFile.clear();
+    if (reverb > 0.0f) {
+        sfzFile += fmt::format("<effect> bus=main type=fverb reverb_size=50 reverb_type=large_hall\n");
+        sfzFile += fmt::format("    reverb_dry=100 reverb_wet={:.1f} reverb_input=100\n", reverb);
+    }
+
     if (!filename.empty())
-        sfzFile += fmt::format("<region> loop_mode=one_shot key=127 sample={}\n", filename);
+        sfzFile += fmt::format("<region> loop_mode=one_shot key=127 volume={:.1f} sample={}\n", volume, filename);
     
     sfzFile += fmt::format("<region> key={} ", waveNote);
 
@@ -324,6 +330,14 @@ static void drawButtons()
     if (ImGui::RadioButton("Use right", &offset, 1))
         updateFilePlot();
     
+    ImGui::SliderFloat("Volume", &volume, -60.0f, 40.0f);
+    if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
+        reloadSfz.clear();
+
+    ImGui::SliderFloat("Reverb", &reverb, 0.0f, 100.0f);
+    if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
+        reloadSfz.clear();
+
     ImGui::Button("Play sample", ImVec2(buttonWidth, 0.0f));
     if (ImGui::IsItemActive() && ImGui::IsMouseClicked(0))
         synth.sampleOn();
