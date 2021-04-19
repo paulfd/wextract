@@ -62,12 +62,9 @@ add_library(miniaudio STATIC
 )
 target_include_directories(miniaudio PUBLIC third_party/miniaudio/extras/miniaudio_split)
 
-add_library(filesystem INTERFACE)
-target_include_directories(filesystem INTERFACE third_party/filesystem/include)
-
-add_executable(wextract src/main.cpp)
-target_include_directories(wextract PRIVATE include)        
-target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui implot miniaudio filesystem fmt::fmt Eigen3::Eigen)
+add_executable(wextract src/main.cpp src/helpers.cpp)
+target_include_directories(wextract PRIVATE include third_party/imgui-filebrowser)        
+target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui implot miniaudio fmt::fmt Eigen3::Eigen)
 
 # Disable note:
 # > note: the ABI of passing structure with ‘complex float’ member has changed in GCC 4.4
