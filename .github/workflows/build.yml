@@ -31,8 +31,8 @@ jobs:
       shell: bash
       working-directory: ${{runner.workspace}}
       run: cmake -E make_directory build
-    # - name: Setup tmate session
-    #   uses: mxschmitt/action-tmate@v3
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
     - name: Configure CMake
       shell: bash
       working-directory: ${{runner.workspace}}/build
