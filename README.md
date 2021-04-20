@@ -13,7 +13,8 @@ Cross-platform tool to extract wavetables and draw envelopes from sample files, 
 - You can build an envelope for the wavetable: use <kbd>Ctrl</kbd>+click to add envelope points on the source file, and double click to remove them. You can also set the sustain level, so that envelope points are computed relative to this level. The output SFZ file contains the flex envelope opcodes should you want to save them.
 - You can save the wavetable when you're happy with it !
 
-## Still to to:
+## Still to do:
+- UI QoL stuff (mouse release while dragging, ...)
 - Frequency view
 - Better signal processing
 - Packaging
