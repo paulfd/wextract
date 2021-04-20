@@ -32,3 +32,7 @@ mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 cmake --build . -j
 ```
+
+[sfizz]:     https://sfz.tools/sfizz/
+[Sforzando]:     https://www.plogue.com/products/sforzando.html
+
