@@ -24,9 +24,9 @@ jobs:
           pkg-config \
           wget \
           libglfw3-dev
-        wget https://github.com/sfztools/sfizz/releases/download/1.0.0/sfizz-1.0.0-linux-amd64.tar.gz
-        sudo tar xzf sfizz-1.0.0-linux-amd64.tar.gz
-        sudo cp -R sfizz-1.0.0-linux-amd64/* /
+        wget https://github.com/sfztools/sfizz/releases/download/1.0.0/sfizz-1.0.0-linux.tar.gz
+        sudo tar xzf sfizz-1.0.0-linux.tar.gz
+        sudo cp -R sfizz-1.0.0-linux/* /
 
     - name: Create Build Environment
       shell: bash

@@ -126,11 +126,11 @@ static void rebuildSfzFile()
     sfzFile += fmt::format("eg01_time1=0 eg01_level1={:.2f}", points[0].y / sustainLevel);
     for (size_t i = 1, n = points.size(); i < n; ++i) {
         sfzFile += fmt::format("\neg01_time{0}={1:.2f} eg01_level{0}={2:.2f}",
-            i + 1, points[i].x - start, points[i].y / sustainLevel);
+            i + 1, points[i].x - points[i - 1].x, points[i].y / sustainLevel);
     }
     if (nonzeroEnd) {
-        sfzFile += fmt::format("\neg01_time{0}={1:.2f} eg01_level{0}={2:.2f} eg01_shape{0}=-8",
-                points.size() + 1, points.back().x - start + 0.01f, 0.0f);
+        sfzFile += fmt::format("\neg01_time{0}={1:.2f} eg01_level{0}={2:.2f} eg01_shape{0}=-3",
+                points.size() + 1, 0.1f, 0.0f);
     }
 }
 
@@ -143,7 +143,7 @@ static void drawPlot()
         ImPlot::SetNextPlotLimitsX(0.0f, xMax, ImGuiCond_Always);
     }
 
-    if (ImPlot::BeginPlot("Soundfile", "time (seconds)", nullptr,
+    if (ImPlot::BeginPlot(filename.c_str(), "time (seconds)", nullptr,
             ImVec2(-1, 0), ImPlotFlags_AntiAliased)) {
         ImPlot::PlotLine("", &plot[0].x, &plot[0].y, 
             static_cast<int>(plot.size()), 0, sizeof(ImPlotPoint));
