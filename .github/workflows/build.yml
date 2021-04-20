@@ -19,20 +19,20 @@ jobs:
     - name: Set up dependencies
       working-directory: ${{runner.workspace}}
       run: |
-        echo 'deb http://download.opensuse.org/repositories/home:/sfztools:/sfizz/xUbuntu_20.04/ /' | sudo tee /etc/apt/sources.list.d/home:sfztools:sfizz.list
-        curl -fsSL https://download.opensuse.org/repositories/home:sfztools:sfizz/xUbuntu_20.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_sfztools_sfizz.gpg > /dev/null
+        echo 'deb http://download.opensuse.org/repositories/home:/sfztools:/sfizz:/develop/xUbuntu_20.04/ /' | sudo tee /etc/apt/sources.list.d/home:sfztools:sfizz:develop.list
+        curl -fsSL https://download.opensuse.org/repositories/home:sfztools:sfizz:develop/xUbuntu_20.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_sfztools_sfizz_develop.gpg > /dev/null
         sudo apt-get update && \
         sudo apt-get install \
           pkg-config \
-          sfizz \
+          libsfizz1-dev \
           libglfw3-dev
 
     - name: Create Build Environment
       shell: bash
       working-directory: ${{runner.workspace}}
       run: cmake -E make_directory build
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v3
+    # - name: Setup tmate session
+    #   uses: mxschmitt/action-tmate@v3
     - name: Configure CMake
       shell: bash
       working-directory: ${{runner.workspace}}/build
