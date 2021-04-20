@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2021 Paul Ferrand
+
 #define NOMINMAX
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>

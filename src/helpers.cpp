@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2021 Paul Ferrand
+
 #include "helpers.h"
 #include <Eigen/Dense>
 #include <numeric>

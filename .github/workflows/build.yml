@@ -23,11 +23,10 @@ jobs:
         sudo apt-get install \
           pkg-config \
           wget \
-          libsndfile1-dev \
           libglfw3-dev
-        wget https://github.com/sfztools/sfizz/releases/download/0.5.1/sfizz-0.5.1-linux-amd64.tar.gz
-        sudo tar xzf sfizz-0.5.1-linux-amd64.tar.gz
-        sudo cp -R sfizz-0.5.1-linux-amd64/* /
+        wget https://github.com/sfztools/sfizz/releases/download/1.0.0/sfizz-1.0.0-linux-amd64.tar.gz
+        sudo tar xzf sfizz-1.0.0-linux-amd64.tar.gz
+        sudo cp -R sfizz-1.0.0-linux-amd64/* /
 
     - name: Create Build Environment
       shell: bash

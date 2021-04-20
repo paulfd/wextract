@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2021 Paul Ferrand
+
 #include <vector>
 #include <tuple>
 #include <complex>
