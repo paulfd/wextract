@@ -24,6 +24,7 @@ jobs:
         sudo apt-get update && \
         sudo apt-get install \
           pkg-config \
+          libsfizz1 \
           libsfizz1-dev \
           libglfw3-dev
 
@@ -31,8 +32,8 @@ jobs:
       shell: bash
       working-directory: ${{runner.workspace}}
       run: cmake -E make_directory build
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v3
+    # - name: Setup tmate session
+    #   uses: mxschmitt/action-tmate@v3
     - name: Configure CMake
       shell: bash
       working-directory: ${{runner.workspace}}/build
