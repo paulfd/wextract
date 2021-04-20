@@ -19,14 +19,14 @@ jobs:
     - name: Set up dependencies
       working-directory: ${{runner.workspace}}
       run: |
+        echo 'deb http://download.opensuse.org/repositories/home:/sfztools:/sfizz/xUbuntu_20.04/ /' | sudo tee /etc/apt/sources.list.d/home:sfztools:sfizz.list \
+        curl -fsSL https://download.opensuse.org/repositories/home:sfztools:sfizz/xUbuntu_20.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_sfztools_sfizz.gpg > /dev/null \
         sudo apt-get update && \
         sudo apt-get install \
           pkg-config \
           wget \
+          sfizz \
           libglfw3-dev
-        wget https://github.com/sfztools/sfizz/releases/download/1.0.0/sfizz-1.0.0-linux.tar.gz
-        sudo tar xzf sfizz-1.0.0-linux.tar.gz
-        sudo cp -R sfizz-1.0.0-linux/* /
 
     - name: Create Build Environment
       shell: bash

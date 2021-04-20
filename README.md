@@ -23,7 +23,7 @@ Cross-platform tool to extract wavetables and draw envelopes from sample files, 
 Clone the repository using the `--recursive` flag to gather all submodules.
 If not, you will need to additionally run `git submodule update --init`.
 The build process requires `cmake`.
-The program depends on `libsfizz` [sfizz] on Linux; Windows dlls are bundled.
+The program depends on `libsfizz` on Linux, you can download your appropriate package on [OBS]; Windows dlls are bundled.
 
 ```sh
 git clone https://github.com/paulfd/wextract --recursive
@@ -35,4 +35,5 @@ cmake --build . -j
 
 [sfizz]:     https://sfz.tools/sfizz/
 [Sforzando]:     https://www.plogue.com/products/sforzando.html
+[OBS]:     https://software.opensuse.org//download.html?project=home%3Asfztools%3Asfizz&package=sfizz
 
