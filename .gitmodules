@@ -22,3 +22,6 @@
 [submodule "third_party/imgui-filebrowser"]
 	path = third_party/imgui-filebrowser
 	url = https://github.com/AirGuanZ/imgui-filebrowser.git
+[submodule "third_party/kissfft"]
+	path = third_party/kissfft
+	url = https://github.com/mborgerding/kissfft.git

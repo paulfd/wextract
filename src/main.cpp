@@ -5,6 +5,7 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <string>
+#include <string_view>
 #include <array>
 #include <filesystem>
 #include <algorithm>
@@ -25,6 +26,9 @@
 #include "threadpool.h"
 #include "defer.h"
 #include "miniaudio.h"
+#include "kiss_fft.h"
+
+namespace fs = std::filesystem;
 
 std::string programName = "wextract";
 
@@ -67,6 +71,8 @@ double yMax { 0.5 };
 std::atomic_flag resetAxis;
 std::vector<ImPlotPoint> plot;
 std::vector<ImPlotPoint> tablePlot;
+std::vector<ImPlotPoint> frequencyPlot {{ 0.0, 0.0 }};
+std::vector<ImPlotPoint> frequencyTablePlot {{ 0.0, 0.0 }};
 
 std::string tableFilename = "";
 std::string sfzFile = "";
@@ -403,6 +409,80 @@ static void drawButtons()
         saveDialog.Open();
     }
 
+    if (ImGui::Button("Frequency response", ImVec2(buttonWidth, 0.0f))) {
+        ImGui::OpenPopup("Frequency");
+
+        // Clear the frequency plots
+        frequencyPlot.clear();
+        frequencyTablePlot.clear();
+        frequencyPlot.push_back({0, 0});
+        frequencyTablePlot.push_back({0, 0});
+
+        pool.enqueue( [] {
+            auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
+                samplePeriod, numChannels, offset);
+            size_t fftSize = static_cast<size_t>(
+                kiss_fft_next_fast_size(static_cast<int>(signal.size()))
+            );
+            kiss_fft_cfg cfg = kiss_fft_alloc(fftSize, false, 0, 0);
+            defer { kiss_fft_free(cfg); };
+            std::vector<kiss_fft_cpx> input (fftSize);
+            std::vector<kiss_fft_cpx> output (fftSize);
+            for (size_t i = 0; i < signal.size(); ++i) {
+                input[i].r = signal[i];
+                input[i].i = 0.0f;
+            }
+
+            for (size_t i = signal.size(); i < fftSize; ++i) {
+                input[i].r = 0.0f;
+                input[i].i = 0.0f;
+            }
+
+            kiss_fft(cfg, input.data(), output.data());
+            
+            frequencyPlot.resize(fftSize / 2);
+            double frequencyStep = sampleRate / fftSize;
+            for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
+                frequencyPlot[i].x = i * frequencyStep;
+                frequencyPlot[i].y = 10.0 * std::log10(
+                    output[i].r * output[i].r + output[i].i * output[i].i
+                );   
+            }
+
+            frequencyTablePlot.resize(fftSize / 2);
+            float waveFrequency = 440.0f * std::pow(2.0, (waveNote - 49) / 12.0);
+            float phaseIncrement = waveFrequency / static_cast<float>(sampleRate);
+            float phase = 0.0f;
+            size_t tableSentinel = (fftSize / tableSize) * tableSize;
+            for (size_t i = 0; i < tableSentinel; ++i) {
+                float position = phase * tableSize;
+                size_t index = static_cast<size_t>(position);
+                float interp = phase - index;
+                input[i].r = (1.0f - interp) * wavetable[index]
+                    + interp * wavetable[(index + 1) % tableSize];
+                fmt::print("{} {} {} {} \n", phase, index, interp, input[i].r);
+                phase += phaseIncrement;
+                phase -= static_cast<int>(phase);
+                phase += phase < 0.0f;
+            }
+            for (size_t i = tableSentinel; i < fftSize; ++i)
+                input[i].r = 0.0f;
+
+            kiss_fft(cfg, input.data(), output.data());
+            for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
+                float samplePeriod = 1 / static_cast<float>(sampleRate);
+                frequencyTablePlot[i].x = i * samplePeriod;
+                frequencyTablePlot[i].y = input[i].r;
+            }
+            // for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
+            //     frequencyTablePlot[i].x = i * frequencyStep;
+            //     frequencyTablePlot[i].y = 10.0 * std::log10(
+            //         output[i].r * output[i].r + output[i].i * output[i].i
+            //     );
+            // }
+        });
+    }
+
 
     // Modal popup
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
@@ -413,6 +493,20 @@ static void drawButtons()
         if (!closeComputationModal.test_and_set())
             ImGui::CloseCurrentPopup();
 
+        ImGui::EndPopup();
+    }
+
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopup("Frequency", 
+        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize)) {
+        if (ImPlot::BeginPlot("Frequency response", "Frequency (Hz)", nullptr,
+            ImVec2(600, 0), ImPlotFlags_AntiAliased, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit)) {
+            // ImPlot::PlotLine("Sample", &frequencyPlot[0].x, &frequencyPlot[0].y, 
+            //     static_cast<int>(frequencyPlot.size()), 0, sizeof(ImPlotPoint));
+            ImPlot::PlotLine("Table", &frequencyTablePlot[0].x, &frequencyTablePlot[0].y, 
+                static_cast<int>(frequencyTablePlot.size()), 0, sizeof(ImPlotPoint));
+            ImPlot::EndPlot();
+        }
         ImGui::EndPopup();
     }
 }
