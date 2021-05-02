@@ -62,10 +62,10 @@ add_library(miniaudio STATIC
 )
 target_include_directories(miniaudio PUBLIC third_party/miniaudio/extras/miniaudio_split)
 
-set(KISSFFT_STATIC ON)
-set(KISSFFT_TEST OFF)
-set(KISSFFT_TOOLS OFF)
-set(KISSFFT_PKGCONFIG OFF)
+set(KISSFFT_STATIC ON CACHE BOOL "" FORCE)
+set(KISSFFT_TEST OFF CACHE BOOL "" FORCE)
+set(KISSFFT_TOOLS OFF CACHE BOOL "" FORCE)
+set(KISSFFT_PKGCONFIG OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/kissfft)
 
 add_executable(wextract src/main.cpp src/helpers.cpp src/synth.cpp)

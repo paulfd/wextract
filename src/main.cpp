@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <algorithm>
 #include <iostream>
+#include <numeric>
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -296,7 +297,7 @@ static void drawWaveAndFile()
         ImVec2(-1, plotWidth), ImGuiInputTextFlags_ReadOnly);
 }
 
-static bool saveWavetable(const fs::path& path, const float* wavetable, int size)
+static bool saveWavetable(const fs::path& path, const float* wavetable, size_t size)
 {
     ma_encoder encoder;
     ma_encoder_config config = 
@@ -364,16 +365,17 @@ static void drawButtons()
             harmonics.clear();
             auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
                 samplePeriod, numChannels, offset);
-            float rootFrequency = 440.0f * std::pow(2.0, (rootNote - 49) / 12.0);
+            float rootFrequency = 440.0f * std::pow(2.0f, (rootNote - 69) / 12.0f);
             float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * numHarmonics);
             float searchFrequency = 0.0f;
             while (searchFrequency < frequencyLimit) {
                 searchFrequency += rootFrequency;
                 auto [frequency, harmonic] = 
-                    frequencyPeakSearch(signal.data(), signal.size(), searchFrequency, sampleRate);
+                    frequencyPeakSearch(signal.data(), signal.size(), searchFrequency, 
+                        static_cast<float>(sampleRate));
 
                 if (harmonics.empty() 
-                    || std::abs(harmonics.back().first - frequency) > rootFrequency)
+                    || std::abs(harmonics.back().first - frequency) > rootFrequency / 2)
                     harmonics.emplace_back(frequency, harmonic);
             }
 
@@ -421,13 +423,24 @@ static void drawButtons()
         pool.enqueue( [] {
             auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
                 samplePeriod, numChannels, offset);
-            size_t fftSize = static_cast<size_t>(
-                kiss_fft_next_fast_size(static_cast<int>(signal.size()))
-            );
+            int fftSize = kiss_fft_next_fast_size(static_cast<int>(signal.size()));
             kiss_fft_cfg cfg = kiss_fft_alloc(fftSize, false, 0, 0);
             defer { kiss_fft_free(cfg); };
             std::vector<kiss_fft_cpx> input (fftSize);
             std::vector<kiss_fft_cpx> output (fftSize);
+
+            const auto normalizeFFT = [] (std::vector<kiss_fft_cpx>& values) {
+                const auto kissCpxPower = [] (const float lhs, const kiss_fft_cpx& rhs) {
+                    return lhs + rhs.r * rhs.r + rhs.i * rhs.i;
+                };
+                float signalPower = std::accumulate(values.begin(), values.end(), 0.0f, kissCpxPower);
+                float factor = 1 / std::sqrt(signalPower);
+                for (auto& cpx: values) {
+                    cpx.r *= factor;
+                    cpx.i *= factor;
+                }
+            };
+
             for (size_t i = 0; i < signal.size(); ++i) {
                 input[i].r = signal[i];
                 input[i].i = 0.0f;
@@ -439,7 +452,7 @@ static void drawButtons()
             }
 
             kiss_fft(cfg, input.data(), output.data());
-            
+            normalizeFFT(output);
             frequencyPlot.resize(fftSize / 2);
             double frequencyStep = sampleRate / fftSize;
             for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
@@ -450,17 +463,16 @@ static void drawButtons()
             }
 
             frequencyTablePlot.resize(fftSize / 2);
-            float waveFrequency = 440.0f * std::pow(2.0, (waveNote - 49) / 12.0);
+            float waveFrequency = 440.0f * std::pow(2.0f, (waveNote - 69) / 12.0f);
             float phaseIncrement = waveFrequency / static_cast<float>(sampleRate);
             float phase = 0.0f;
             size_t tableSentinel = (fftSize / tableSize) * tableSize;
             for (size_t i = 0; i < tableSentinel; ++i) {
                 float position = phase * tableSize;
                 size_t index = static_cast<size_t>(position);
-                float interp = phase - index;
+                float interp = position - index;
                 input[i].r = (1.0f - interp) * wavetable[index]
                     + interp * wavetable[(index + 1) % tableSize];
-                fmt::print("{} {} {} {} \n", phase, index, interp, input[i].r);
                 phase += phaseIncrement;
                 phase -= static_cast<int>(phase);
                 phase += phase < 0.0f;
@@ -469,17 +481,13 @@ static void drawButtons()
                 input[i].r = 0.0f;
 
             kiss_fft(cfg, input.data(), output.data());
+            normalizeFFT(output);
             for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
-                float samplePeriod = 1 / static_cast<float>(sampleRate);
-                frequencyTablePlot[i].x = i * samplePeriod;
-                frequencyTablePlot[i].y = input[i].r;
+                frequencyTablePlot[i].x = i * frequencyStep;
+                frequencyTablePlot[i].y = 10.0 * std::log10(
+                    output[i].r * output[i].r + output[i].i * output[i].i
+                );
             }
-            // for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
-            //     frequencyTablePlot[i].x = i * frequencyStep;
-            //     frequencyTablePlot[i].y = 10.0 * std::log10(
-            //         output[i].r * output[i].r + output[i].i * output[i].i
-            //     );
-            // }
         });
     }
 
@@ -500,9 +508,9 @@ static void drawButtons()
     if (ImGui::BeginPopup("Frequency", 
         ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize)) {
         if (ImPlot::BeginPlot("Frequency response", "Frequency (Hz)", nullptr,
-            ImVec2(600, 0), ImPlotFlags_AntiAliased, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit)) {
-            // ImPlot::PlotLine("Sample", &frequencyPlot[0].x, &frequencyPlot[0].y, 
-            //     static_cast<int>(frequencyPlot.size()), 0, sizeof(ImPlotPoint));
+            ImVec2(600, 0), ImPlotFlags_AntiAliased, ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_LogScale, ImPlotAxisFlags_AutoFit)) {
+            ImPlot::PlotLine("Sample", &frequencyPlot[0].x, &frequencyPlot[0].y, 
+                static_cast<int>(frequencyPlot.size()), 0, sizeof(ImPlotPoint));
             ImPlot::PlotLine("Table", &frequencyTablePlot[0].x, &frequencyTablePlot[0].y, 
                 static_cast<int>(frequencyTablePlot.size()), 0, sizeof(ImPlotPoint));
             ImPlot::EndPlot();
