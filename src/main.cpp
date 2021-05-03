@@ -37,9 +37,9 @@ constexpr int blockSize { 256 };
 ThreadPool pool { 1 };
 
 float windowWidth { 1000 };
-float windowHeight { 620 };
+float windowHeight { 650 };
 constexpr float buttonGroupSize { 220.0f };
-constexpr float groupHeight { 300.0f };
+constexpr float groupHeight { 330.0f };
 
 Synth synth { blockSize };
 
@@ -62,7 +62,7 @@ float reverb { 0.0f };
 float volume { 0.0f };
 
 int rootNote { 36 };
-int numHarmonics { 16 };
+int numHarmonics { 64 };
 int tableSize { 1024 };
 HarmonicVector harmonics;
 std::vector<float> wavetable;
@@ -112,7 +112,7 @@ static void rebuildSfzFile()
     if (!filename.empty())
         sfzFile += fmt::format("<region> loop_mode=one_shot key=127 volume={:.1f} sample={}\n", volume, filename);
     
-    sfzFile += fmt::format("<region> key={} ", waveNote);
+    sfzFile += fmt::format("<region> lokey=1 hikey=126 ");
 
     if (!tableFilename.empty())
         sfzFile += fmt::format("oscillator=on sample={}\n", tableFilename);
@@ -151,7 +151,7 @@ static void drawPlot()
     }
 
     if (ImPlot::BeginPlot(filename.c_str(), "time (seconds)", nullptr,
-            ImVec2(-1, 0), ImPlotFlags_AntiAliased)) {
+            ImVec2(-1, groupHeight), ImPlotFlags_AntiAliased)) {
         ImPlot::PlotLine("", &plot[0].x, &plot[0].y, 
             static_cast<int>(plot.size()), 0, sizeof(ImPlotPoint));
         ImPlot::DragLineX("DragStart", &regionStart);
@@ -324,6 +324,108 @@ static bool saveWavetable(const fs::path& path, const float* wavetable, size_t s
     return true;
 }
 
+static void updateFFTPlots()
+{
+    auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
+        samplePeriod, numChannels, offset);
+    int fftSize = kiss_fft_next_fast_size(static_cast<int>(signal.size()));
+    kiss_fft_cfg cfg = kiss_fft_alloc(fftSize, false, 0, 0);
+    defer { kiss_fft_free(cfg); };
+    std::vector<kiss_fft_cpx> input (fftSize);
+    std::vector<kiss_fft_cpx> output (fftSize);
+
+    const auto normalizeFFT = [] (std::vector<kiss_fft_cpx>& values) {
+        const auto kissCpxPower = [] (const float lhs, const kiss_fft_cpx& rhs) {
+            return lhs + rhs.r * rhs.r + rhs.i * rhs.i;
+        };
+        float signalPower = std::accumulate(values.begin(), values.end(), 0.0f, kissCpxPower);
+        float factor = 1 / std::sqrt(signalPower);
+        for (auto& cpx: values) {
+            cpx.r *= factor;
+            cpx.i *= factor;
+        }
+    };
+
+    for (size_t i = 0; i < signal.size(); ++i) {
+        input[i].r = signal[i];
+        input[i].i = 0.0f;
+    }
+
+    for (size_t i = signal.size(); i < fftSize; ++i) {
+        input[i].r = 0.0f;
+        input[i].i = 0.0f;
+    }
+
+    kiss_fft(cfg, input.data(), output.data());
+    normalizeFFT(output);
+    frequencyPlot.resize(fftSize / 2);
+    double frequencyStep = sampleRate / fftSize;
+    for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
+        frequencyPlot[i].x = i * frequencyStep;
+        frequencyPlot[i].y = 10.0 * std::log10(
+            output[i].r * output[i].r + output[i].i * output[i].i
+        );   
+    }
+
+    frequencyTablePlot.resize(fftSize / 2);
+    float waveFrequency = 440.0f * std::pow(2.0f, (waveNote - 69) / 12.0f);
+    float phaseIncrement = waveFrequency / static_cast<float>(sampleRate);
+    float phase = 0.0f;
+    size_t tableSentinel = (fftSize / tableSize) * tableSize;
+    for (size_t i = 0; i < tableSentinel; ++i) {
+        float position = phase * tableSize;
+        size_t index = static_cast<size_t>(position);
+        float interp = position - index;
+        input[i].r = (1.0f - interp) * wavetable[index]
+            + interp * wavetable[(index + 1) % tableSize];
+        phase += phaseIncrement;
+        phase -= static_cast<int>(phase);
+        phase += phase < 0.0f;
+    }
+    for (size_t i = tableSentinel; i < fftSize; ++i)
+        input[i].r = 0.0f;
+
+    kiss_fft(cfg, input.data(), output.data());
+    normalizeFFT(output);
+    for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
+        frequencyTablePlot[i].x = i * frequencyStep;
+        frequencyTablePlot[i].y = 10.0 * std::log10(
+            output[i].r * output[i].r + output[i].i * output[i].i
+        );
+    }
+}
+
+static void extractTable()
+{
+    harmonics.clear();
+    auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
+        samplePeriod, numChannels, offset);
+    float rootFrequency = 440.0f * std::pow(2.0f, (rootNote - 69) / 12.0f);
+    float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * numHarmonics);
+    float searchFrequency = 0.0f;
+    while (searchFrequency < frequencyLimit) {
+        searchFrequency += rootFrequency;
+        auto [frequency, harmonic] = 
+            frequencyPeakSearch(signal.data(), signal.size(), searchFrequency, 
+                static_cast<float>(sampleRate));
+
+        if (harmonics.empty() 
+            || std::abs(harmonics.back().first - frequency) > rootFrequency / 2)
+            harmonics.emplace_back(frequency, harmonic);
+    }
+
+    wavetable = buildWavetable(harmonics, tableSize);
+    updateTablePlot();
+    closeComputationModal.clear();
+
+    tableFilename = "table.wav";
+    if (!saveWavetable(synth.getRootDirectory() / tableFilename, 
+        wavetable.data(), wavetable.size())) {
+        tableFilename = "";
+    }
+    reloadSfz.clear();
+}
+
 static void drawButtons()
 {
     const auto padding = ImGui::GetStyle().WindowPadding;
@@ -361,42 +463,11 @@ static void drawButtons()
     ImGui::InputInt("Table size", &tableSize);
     if (ImGui::Button("Extract table", ImVec2(buttonWidth, 0.0f))) {
         ImGui::OpenPopup("Computation");
-        pool.enqueue( [] {
-            harmonics.clear();
-            auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
-                samplePeriod, numChannels, offset);
-            float rootFrequency = 440.0f * std::pow(2.0f, (rootNote - 69) / 12.0f);
-            float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * numHarmonics);
-            float searchFrequency = 0.0f;
-            while (searchFrequency < frequencyLimit) {
-                searchFrequency += rootFrequency;
-                auto [frequency, harmonic] = 
-                    frequencyPeakSearch(signal.data(), signal.size(), searchFrequency, 
-                        static_cast<float>(sampleRate));
-
-                if (harmonics.empty() 
-                    || std::abs(harmonics.back().first - frequency) > rootFrequency / 2)
-                    harmonics.emplace_back(frequency, harmonic);
-            }
-
-            wavetable = buildWavetable(harmonics, tableSize);
-            updateTablePlot();
-            closeComputationModal.clear();
-
-            tableFilename = "table.wav";
-            if (!saveWavetable(synth.getRootDirectory() / tableFilename, 
-                wavetable.data(), wavetable.size())) {
-                tableFilename = "";
-            }
-            reloadSfz.clear();                
-        });
+        pool.enqueue(extractTable);
     }
 
-
     ImGui::Separator();
-    if (ImGui::SliderInt("Note", &waveNote, 0, 126))
-        reloadSfz.clear();
-
+    ImGui::SliderInt("Note", &waveNote, 1, 126);
     ImGui::Button("Play table", ImVec2(buttonWidth, 0.0f));
     if (ImGui::IsItemActive() && ImGui::IsMouseClicked(0)) {
         synth.setWaveNote(waveNote);
@@ -420,75 +491,7 @@ static void drawButtons()
         frequencyPlot.push_back({0, 0});
         frequencyTablePlot.push_back({0, 0});
 
-        pool.enqueue( [] {
-            auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
-                samplePeriod, numChannels, offset);
-            int fftSize = kiss_fft_next_fast_size(static_cast<int>(signal.size()));
-            kiss_fft_cfg cfg = kiss_fft_alloc(fftSize, false, 0, 0);
-            defer { kiss_fft_free(cfg); };
-            std::vector<kiss_fft_cpx> input (fftSize);
-            std::vector<kiss_fft_cpx> output (fftSize);
-
-            const auto normalizeFFT = [] (std::vector<kiss_fft_cpx>& values) {
-                const auto kissCpxPower = [] (const float lhs, const kiss_fft_cpx& rhs) {
-                    return lhs + rhs.r * rhs.r + rhs.i * rhs.i;
-                };
-                float signalPower = std::accumulate(values.begin(), values.end(), 0.0f, kissCpxPower);
-                float factor = 1 / std::sqrt(signalPower);
-                for (auto& cpx: values) {
-                    cpx.r *= factor;
-                    cpx.i *= factor;
-                }
-            };
-
-            for (size_t i = 0; i < signal.size(); ++i) {
-                input[i].r = signal[i];
-                input[i].i = 0.0f;
-            }
-
-            for (size_t i = signal.size(); i < fftSize; ++i) {
-                input[i].r = 0.0f;
-                input[i].i = 0.0f;
-            }
-
-            kiss_fft(cfg, input.data(), output.data());
-            normalizeFFT(output);
-            frequencyPlot.resize(fftSize / 2);
-            double frequencyStep = sampleRate / fftSize;
-            for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
-                frequencyPlot[i].x = i * frequencyStep;
-                frequencyPlot[i].y = 10.0 * std::log10(
-                    output[i].r * output[i].r + output[i].i * output[i].i
-                );   
-            }
-
-            frequencyTablePlot.resize(fftSize / 2);
-            float waveFrequency = 440.0f * std::pow(2.0f, (waveNote - 69) / 12.0f);
-            float phaseIncrement = waveFrequency / static_cast<float>(sampleRate);
-            float phase = 0.0f;
-            size_t tableSentinel = (fftSize / tableSize) * tableSize;
-            for (size_t i = 0; i < tableSentinel; ++i) {
-                float position = phase * tableSize;
-                size_t index = static_cast<size_t>(position);
-                float interp = position - index;
-                input[i].r = (1.0f - interp) * wavetable[index]
-                    + interp * wavetable[(index + 1) % tableSize];
-                phase += phaseIncrement;
-                phase -= static_cast<int>(phase);
-                phase += phase < 0.0f;
-            }
-            for (size_t i = tableSentinel; i < fftSize; ++i)
-                input[i].r = 0.0f;
-
-            kiss_fft(cfg, input.data(), output.data());
-            normalizeFFT(output);
-            for (size_t i = 0, n = fftSize / 2; i < n; ++i) {
-                frequencyTablePlot[i].x = i * frequencyStep;
-                frequencyTablePlot[i].y = 10.0 * std::log10(
-                    output[i].r * output[i].r + output[i].i * output[i].i
-                );
-            }
-        });
+        pool.enqueue(updateFFTPlots);
     }
 
 
