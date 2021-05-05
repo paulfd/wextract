@@ -58,7 +58,7 @@ jobs:
       run: |
         wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
         chmod +x linuxdeploy*.AppImage
-        ./linuxdeploy-x86_64.AppImage --create-desktop-file --executable=wextract --icon-file=../extras/wextract.png --appdir AppDir --output appimage
+        ./linuxdeploy-x86_64.AppImage --create-desktop-file --executable=wextract --icon-file=$GITHUB_WORKSPACE/extras/wextract.png --appdir AppDir --output appimage
     - name: Archive artifacts
       uses: actions/upload-artifact@v2
       with:
