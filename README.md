@@ -33,7 +33,28 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 cmake --build . -j
 ```
 
+## Licenses
+
+- [sfizz], by SFZTools: BSD 2-Clause License
+- [Eigen], by Benoit Jacob, Gaël Guennebaud and contributors: Mozilla Public License v2
+- [fmt], by Victor Zverovich: MIT License
+- [GLFW], by Marcus Geelnard and Camilla Löwy: Zlib license
+- [imgui], by Omar Cornut and contributors: MIT License
+- [implot], by Evan Pezent: MIT License
+- [imgui-filebrowser], by AirGuanZ: MIT License
+- [kissfft], by Mark Borgerding: BSD 3-clause License
+- [miniaudio], by David Reid: Public Domain
+- The icon is by [Becris]
+
 [sfizz]:     https://sfz.tools/sfizz/
 [Sforzando]:     https://www.plogue.com/products/sforzando.html
 [OBS]:     https://software.opensuse.org//download.html?project=home%3Asfztools%3Asfizz&package=sfizz
-
+[Becris]: https://creativemarket.com/Becris
+[Eigen]: https://eigen.tuxfamily.org
+[fmt]: https://github.com/fmtlib/fmt
+[GLFW]: https://github.com/glfw/glfw
+[imgui]: https://github.com/ocornut/imgui
+[implot]: https://github.com/epezent/implot
+[imgui-filebrowser]: https://github.com/AirGuanZ/imgui-filebrowser
+[kissfft]: https://github.com/mborgerding/kissfft
+[miniaudio]: https://github.com/mackron/miniaudio

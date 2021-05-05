@@ -2,6 +2,7 @@
 // Copyright (c) 2021 Paul Ferrand
 
 #include "helpers.h"
+#define EIGEN_MPL2_ONLY
 #include <Eigen/Dense>
 #include <numeric>
 
