@@ -67,7 +67,7 @@ set(KISSFFT_STATIC ON CACHE BOOL "" FORCE)
 set(KISSFFT_TEST OFF CACHE BOOL "" FORCE)
 set(KISSFFT_TOOLS OFF CACHE BOOL "" FORCE)
 set(KISSFFT_PKGCONFIG OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/kissfft)
+add_subdirectory(third_party/kissfft EXCLUDE_FROM_ALL)
 
 add_executable(wextract src/main.cpp src/helpers.cpp src/synth.cpp)
 target_include_directories(wextract PRIVATE include third_party/imgui-filebrowser)        
@@ -101,4 +101,8 @@ if (MSVC)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${PROJECT_SOURCE_DIR}/third_party/sfizz/$<CONFIG>/sfizz.dll"
             $<TARGET_FILE_DIR:wextract>)
+endif()
+
+if(NOT MSVC)
+    install(TARGETS wextract RUNTIME)
 endif()
