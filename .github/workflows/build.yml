@@ -20,8 +20,8 @@ jobs:
       working-directory: ${{runner.workspace}}
       run: |
         echo 'deb http://download.opensuse.org/repositories/home:/sfztools:/sfizz/xUbuntu_18.04/ /' | sudo tee /etc/apt/sources.list.d/home:sfztools:sfizz.list
-        curl -fsSL https://download.opensuse.org/repositories/home:sfztools:sfizz/xUbuntu_18.04/Release.key | gpg --dearmor | sudo tee /
-        sudo apt-get update && \
+        curl -fsSL https://download.opensuse.org/repositories/home:sfztools:sfizz/xUbuntu_18.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_sfztools_sfizz.gpg > /dev/null
+        sudo apt-get update
         sudo apt-get install \
           pkg-config \
           libsfizz1 \
@@ -52,8 +52,8 @@ jobs:
       shell: bash
       working-directory: ${{runner.workspace}}/build
       run: |
-        wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
-        chmod +x linuxdeploy*.AppImage \
+        wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+        chmod +x linuxdeploy*.AppImage
         linuxdeploy-x86_64.AppImage --create-desktop-file --executable=wextract --icon-file=../extras/wextract.png --appdir AppDir --output appimage
     - name: Archive artifacts
       uses: actions/upload-artifact@v2
@@ -64,12 +64,6 @@ jobs:
   build_for_win64:
     runs-on: windows-2019
     steps:
-    - name: Set install name
-      run: |
-        echo platform=x64 >> "${Env:GITHUB_ENV}"
-        echo release_arch=x64 >> "${Env:GITHUB_ENV}"
-        echo "install_ref=$(${Env:GITHUB_REF}.split('/')[-1])" >> "${Env:GITHUB_ENV}"
-        echo "install_name=sfizz-$(${Env:GITHUB_REF}.split('/')[-1])-win64" >> "${Env:GITHUB_ENV}"
     - uses: actions/checkout@v2
       with:
         submodules: recursive
@@ -89,4 +83,3 @@ jobs:
         name: Windows
         path: |
           build/Release/wextract.exe
-          build/Release/sfizz.dll
