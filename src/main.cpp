@@ -230,21 +230,19 @@ static void readFileSample(std::string_view path)
     ma_decoder_config decoder_config = ma_decoder_config_init(ma_format_f32, 2, sampleRate);
     auto result = ma_decoder_init_file(path.data(), &decoder_config, &decoder);
     if (result != MA_SUCCESS){
-        std::cout << "Could not open sound file\n";
+        std::cerr << "Could not open sound file\n";
         return;
     }
     defer { ma_decoder_uninit(&decoder); };
 
     numFrames = static_cast<int>(ma_decoder_get_length_in_pcm_frames(&decoder));
     numChannels = decoder.internalChannels;
-    std::cout << "Number of frames: " << numFrames << '\n';
-    std::cout << "Number of channels: " << numChannels << '\n';
 
     // Read the base file
     file.resize(numFrames * numChannels);
     std::fill(file.begin(), file.end(), 0.0f);
     if (numFrames != ma_decoder_read_pcm_frames(&decoder, file.data(), numFrames))
-        std::cout << "Error reading the file!\n";
+        std::cerr << "Error reading the file!\n";
 }
 
 static void updateFilePlot()
@@ -560,14 +558,11 @@ int main(int argc, char *argv[])
     samplePeriod = 1 / static_cast<double>(sampleRate);
     synth.setSampleRate(device.sampleRate);
     ma_device_start(&device);
-    
-    std::cout << "Backend: " << ma_get_backend_name(device.pContext->backend) << '\n';
-    std::cout << "Sample rate: " << device.sampleRate << '\n';
+
     if (!glfwInit()) {
         std::cerr << "[ERROR] Couldn't initialize GLFW\n";
         return -1;
     }
-    std::cout << "[INFO] GLFW initialized\n";
 
     // setup GLFW window
 
@@ -618,11 +613,6 @@ int main(int argc, char *argv[])
         std::cerr << "[ERROR] Couldn't initialize GLAD" << '\n';
         return -1;
     }
-
-    std::cout << "[INFO] GLAD initialized\n";
-    std::cout << "[INFO] OpenGL from glad "
-              << GLVersion.major << "." << GLVersion.minor
-              << '\n';
 
     int actualWindowWidth, actualWindowHeight;
     fmt::print("{}\n", actualWindowHeight);
