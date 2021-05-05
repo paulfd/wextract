@@ -11,7 +11,7 @@ env:
 
 jobs:
   build_for_linux:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-18.04
     steps:
     - uses: actions/checkout@v2
       with:
@@ -19,13 +19,14 @@ jobs:
     - name: Set up dependencies
       working-directory: ${{runner.workspace}}
       run: |
-        echo 'deb http://download.opensuse.org/repositories/home:/sfztools:/sfizz:/develop/xUbuntu_20.04/ /' | sudo tee /etc/apt/sources.list.d/home:sfztools:sfizz:develop.list
-        curl -fsSL https://download.opensuse.org/repositories/home:sfztools:sfizz:develop/xUbuntu_20.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_sfztools_sfizz_develop.gpg > /dev/null
+        echo 'deb http://download.opensuse.org/repositories/home:/sfztools:/sfizz/xUbuntu_18.04/ /' | sudo tee /etc/apt/sources.list.d/home:sfztools:sfizz.list
+        curl -fsSL https://download.opensuse.org/repositories/home:sfztools:sfizz/xUbuntu_18.04/Release.key | gpg --dearmor | sudo tee /
         sudo apt-get update && \
         sudo apt-get install \
           pkg-config \
           libsfizz1 \
           libsfizz1-dev \
+          wget \
           libglfw3-dev
 
     - name: Create Build Environment
@@ -38,11 +39,28 @@ jobs:
       shell: bash
       working-directory: ${{runner.workspace}}/build
       run: |
-        cmake "$GITHUB_WORKSPACE" -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+        cmake "$GITHUB_WORKSPACE" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DCMAKE_INSTALL_PREFIX=/usr
     - name: Build
       shell: bash
       working-directory: ${{runner.workspace}}/build
       run: cmake --build . --config "$BUILD_TYPE" -j 2
+    - name: Install
+      shell: bash
+      working-directory: ${{runner.workspace}}/build
+      run: make install DESTDIR=AppDir
+    - name: Build AppImage
+      shell: bash
+      working-directory: ${{runner.workspace}}/build
+      run: |
+        wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
+        chmod +x linuxdeploy*.AppImage \
+        linuxdeploy-x86_64.AppImage --create-desktop-file --executable=wextract --icon-file=../extras/wextract.png --appdir AppDir --output appimage
+    - name: Archive artifacts
+      uses: actions/upload-artifact@v2
+      working-directory: ${{runner.workspace}}/build
+      with:
+        name: AppImage
+        path: wextract*.AppImage*
 
   build_for_win64:
     runs-on: windows-2019
@@ -66,3 +84,11 @@ jobs:
     - name: Build
       working-directory: ${{runner.workspace}}/build
       run: cmake --build . --config "${Env:BUILD_TYPE}" -j 2
+    - name: Archive artifacts
+      uses: actions/upload-artifact@v2
+      working-directory: ${{runner.workspace}}/build
+      with:
+        name: Windows
+        path: |
+          Release/wextract.exe
+          Release/sfizz.dll

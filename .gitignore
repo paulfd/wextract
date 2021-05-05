@@ -1,3 +1,4 @@
 build*
 launch.json
 settings.json
+compile_commands.json
