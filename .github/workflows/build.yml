@@ -63,7 +63,7 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: AppImage
-        path: build/wextract*.AppImage*
+        path: ${{runner.workspace}}/build/wextract*.AppImage*
 
   build_for_win64:
     runs-on: windows-2019
