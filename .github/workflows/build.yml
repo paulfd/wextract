@@ -57,10 +57,9 @@ jobs:
         linuxdeploy-x86_64.AppImage --create-desktop-file --executable=wextract --icon-file=../extras/wextract.png --appdir AppDir --output appimage
     - name: Archive artifacts
       uses: actions/upload-artifact@v2
-      working-directory: ${{runner.workspace}}/build
       with:
         name: AppImage
-        path: wextract*.AppImage*
+        path: build/wextract*.AppImage*
 
   build_for_win64:
     runs-on: windows-2019
@@ -86,9 +85,8 @@ jobs:
       run: cmake --build . --config "${Env:BUILD_TYPE}" -j 2
     - name: Archive artifacts
       uses: actions/upload-artifact@v2
-      working-directory: ${{runner.workspace}}/build
       with:
         name: Windows
         path: |
-          Release/wextract.exe
-          Release/sfizz.dll
+          build/Release/wextract.exe
+          build/Release/sfizz.dll
