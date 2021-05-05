@@ -21,13 +21,17 @@ jobs:
       run: |
         echo 'deb http://download.opensuse.org/repositories/home:/sfztools:/sfizz/xUbuntu_18.04/ /' | sudo tee /etc/apt/sources.list.d/home:sfztools:sfizz.list
         curl -fsSL https://download.opensuse.org/repositories/home:sfztools:sfizz/xUbuntu_18.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_sfztools_sfizz.gpg > /dev/null
+        sudo add-apt-repository ppa:ubuntu-toolchain-r/test
         sudo apt-get update
         sudo apt-get install \
+          gcc-9 \
+          g++-9 \
           pkg-config \
           libsfizz1 \
           libsfizz1-dev \
           wget \
           libglfw3-dev
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-9
 
     - name: Create Build Environment
       shell: bash
@@ -64,6 +68,10 @@ jobs:
   build_for_win64:
     runs-on: windows-2019
     steps:
+    - name: Set install name
+      run: |
+        echo platform=x64 >> "${Env:GITHUB_ENV}"
+        echo release_arch=x64 >> "${Env:GITHUB_ENV}"
     - uses: actions/checkout@v2
       with:
         submodules: recursive
@@ -82,4 +90,5 @@ jobs:
       with:
         name: Windows
         path: |
-          build/Release/wextract.exe
+          ${{runner.workspace}}/build/Release/wextract.exe
+          ${{runner.workspace}}/build/Release/sfizz.dll
