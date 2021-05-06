@@ -1,6 +1,6 @@
 # wextract
 
-Cross-platform tool to extract wavetables and draw envelopes from sample files, exporting the wavetable and generating the appropriate SFZ text to use in [sfizz] or [Sforzando].
+Cross-platform tool to extract wavetables and draw envelopes from sample files, exporting the wavetable and generating the appropriate SFZ text to use in [sfizz].
 
 ![Screenshot](picture.png)
 
@@ -45,7 +45,6 @@ cmake --build . -j
 - The icon is by [Becris]
 
 [sfizz]:     https://sfz.tools/sfizz/
-[Sforzando]:     https://www.plogue.com/products/sforzando.html
 [OBS]:     https://software.opensuse.org//download.html?project=home%3Asfztools%3Asfizz&package=sfizz
 [Becris]: https://creativemarket.com/Becris
 [Eigen]: https://eigen.tuxfamily.org
