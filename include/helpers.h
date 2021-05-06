@@ -11,7 +11,7 @@ std::vector<float> extractSignalRange(const float* source, double regionStart, d
     double samplePeriod, int stride = 2, int offset = 0);
 
 std::pair<float, std::complex<float>> frequencyPeakSearch(float* signal, size_t size, float coarseFrequency, 
-    float sampleRate, float centsRange = 20, int pointsPerCents = 2);
+    float sampleRate, float range = 10, int resolution = 100);
 
 std::vector<float> buildWavetable(const HarmonicVector& harmonics, int size,
     bool normalizePower = true);

@@ -15,7 +15,6 @@ Cross-platform tool to extract wavetables and draw envelopes from sample files, 
 
 ## Still to do:
 - UI QoL stuff (mouse release while dragging, ...)
-- Tweak the signal processing for large numbers of harmonics
 
 ## Building
 

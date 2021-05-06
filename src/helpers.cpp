@@ -12,15 +12,12 @@ template<class T>
 constexpr T pi = T { 3.14159265358979323846 };
 
 std::pair<float, std::complex<float>> frequencyPeakSearch(float* signal, size_t size, float coarseFrequency, 
-    float sampleRate, float centsRange, int pointsPerCents)
+    float sampleRate, float range, int resolution)
 {
     using namespace Eigen;
 
     // Build the super-resolution time-frequency matrix around the coarse frequency
-    float logFreq = std::log2(coarseFrequency);
-    VectorXf freq = VectorXf::LinSpaced(2 * pointsPerCents * static_cast<int>(centsRange) + 1, 
-        logFreq - centsRange / 1200, logFreq + centsRange / 1200);
-    freq = pow(2.0f, freq.array());
+    VectorXf freq = VectorXf::LinSpaced(2 * resolution + 1, coarseFrequency - range, coarseFrequency + range);
     VectorXf time = VectorXf::LinSpaced(size, 0, static_cast<float>(size - 1)) / sampleRate;
 
     MatrixXcf projectionMatrix = 
