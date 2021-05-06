@@ -69,6 +69,11 @@ set(KISSFFT_TOOLS OFF CACHE BOOL "" FORCE)
 set(KISSFFT_PKGCONFIG OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/kissfft EXCLUDE_FROM_ALL)
 
+# Make a non-console window
+if(MSVC)
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+endif()
+
 add_executable(wextract src/main.cpp src/helpers.cpp src/synth.cpp)
 target_include_directories(wextract PRIVATE include third_party/imgui-filebrowser)        
 target_link_libraries(wextract PRIVATE OpenGL::GL sfizz glad glfw imgui 
