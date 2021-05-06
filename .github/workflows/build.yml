@@ -102,7 +102,11 @@ jobs:
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v2
-      - name: Inspect directory after downloading artifacts
+      - name: Rezip windows artifact
+        uses: montudor/action-zip@v1
+        with:
+          args: zip -r wextract-win64.zip wextract-win64
+      - name: Inspect directory
         run: ls -alFR
       - name: Create release and upload artifacts
         env:
@@ -110,4 +114,4 @@ jobs:
         run: |
             wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
             chmod +x pyuploadtool-x86_64.AppImage
-            ./pyuploadtool-x86_64.AppImage **/wextract*.AppImage* **/wextract-win64*.zip*
+            ./pyuploadtool-x86_64.AppImage **/wextract*.AppImage* wextract-win64.zip
