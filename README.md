@@ -14,7 +14,7 @@ Cross-platform tool to extract wavetables and draw envelopes from sample files, 
 - You can save the wavetable when you're happy with it !
 
 ## Still to do:
-- UI QoL stuff (mouse release while dragging, ...)
+- UI QoL stuff (mouse release while dragging, etc)
 
 ## Building
 
