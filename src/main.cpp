@@ -54,8 +54,14 @@ using namespace gl;
 #include "helpers.h"
 #include "threadpool.h"
 #include "defer.h"
+/* #define MA_ENABLE_ONLY_SPECIFIC_BACKENDSMA_ENABLE_JACK
+  #define MA_ENABLE_JACK */
 #include "miniaudio.h"
 #include "kiss_fft.h"
+
+
+
+
 
 namespace fs = std::filesystem;
 
@@ -149,7 +155,7 @@ static void rebuildSfzFile()
     else
         sfzFile += "sample=*sine\n";
 
-    if (points.size() < 2)        
+    if (points.size() < 2)
         return;
 
     bool nonzeroEnd = points.back().y > 0.0f;
@@ -201,7 +207,7 @@ static void drawPlot()
             ImPlot::PlotToPixels(ImPlotPoint(regionEnd, ImPlot::GetPlotLimits().Y.Max)),
             ImGui::GetColorU32(ImVec4(1, 1, 1, 0.25f))
         );
-        
+
         auto mousePlotPos = ImPlot::GetPlotMousePos();
         auto mousePos = ImGui::GetMousePos();
         if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(0) && io.KeyCtrl) {
@@ -216,8 +222,8 @@ static void drawPlot()
             NamedPlotPoint& p = *it;
             ImPlot::DragPoint(p.name.c_str(), &p.x, &p.y, false);
             p.y = std::max(0.0, p.y);
-            
-            if (ImGui::IsItemHovered() || ImGui::IsItemActive()) { 
+
+            if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
                 if (ImGui::IsMouseDoubleClicked(0)) {
                     it = points.erase(it);
                     reloadSfz.clear();
@@ -227,19 +233,19 @@ static void drawPlot()
                 if (ImGui::IsMouseDragging(0))
                     sortPoints();
 
-                if (ImGui::IsMouseReleased(0)) 
+                if (ImGui::IsMouseReleased(0))
                     reloadSfz.clear();
 
                 const ImVec2 pos = ImPlot::PlotToPixels(p.x, p.y);
                 ImPlotContext& gp = *ImPlot::GetCurrentContext();
                 gp.CurrentPlot->PlotHovered = false;
-                ImVec2 label_pos = pos + 
+                ImVec2 label_pos = pos +
                     ImVec2(16 * GImGui->Style.MouseCursorScale, 8 * GImGui->Style.MouseCursorScale);
                 char buff1[32];
                 char buff2[32];
                 ImPlot::LabelAxisValue(gp.CurrentPlot->XAxis, gp.XTicks, p.x, buff1, 32);
                 ImPlot::LabelAxisValue(gp.CurrentPlot->YAxis[0], gp.YTicks[0], p.y, buff2, 32);
-                gp.Annotations.Append(label_pos, ImVec2(0.0001f,0.00001f), col32, ImPlot::CalcTextColor(color), 
+                gp.Annotations.Append(label_pos, ImVec2(0.0001f,0.00001f), col32, ImPlot::CalcTextColor(color),
                     true, "%s,%s", buff1, buff2);
             }
             ++it;
@@ -342,7 +348,7 @@ static void drawWaveAndFile()
     const int size = static_cast<int>(tablePlot.size());
     ImPlot::SetNextPlotLimitsX(0.0, 1.0);
     if (ImPlot::BeginPlot("Wavetable", nullptr, nullptr,
-        ImVec2(plotWidth, plotWidth), 0, 
+        ImVec2(plotWidth, plotWidth), 0,
         ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoTickLabels,
         ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoTickLabels)) {
         ImPlot::PlotLine("", &tablePlot[0].x, &tablePlot[0].y, size, 0, sizeof(ImPlotPoint));
@@ -350,16 +356,16 @@ static void drawWaveAndFile()
     }
 
     ImGui::SameLine();
-    ImGui::InputTextMultiline("##source", const_cast<char*>(sfzFile.c_str()), sfzFile.size(), 
+    ImGui::InputTextMultiline("##source", const_cast<char*>(sfzFile.c_str()), sfzFile.size(),
         ImVec2(-1, plotWidth), ImGuiInputTextFlags_ReadOnly);
 }
 
 static bool saveWavetable(const fs::path& path, const float* wavetable, size_t size)
 {
     ma_encoder encoder;
-    ma_encoder_config config = 
+    ma_encoder_config config =
         ma_encoder_config_init(ma_resource_format_wav, ma_format_f32, 1, 44100);
-        
+
     std::string tablePath = path.string();
     ma_result result = ma_encoder_init_file(tablePath.c_str(), &config, &encoder);
     defer { ma_encoder_uninit(&encoder); };
@@ -374,7 +380,7 @@ static bool saveWavetable(const fs::path& path, const float* wavetable, size_t s
 
         if (fs::exists(path))
             fs::remove(path);
-        
+
         return false;
     }
 
@@ -383,7 +389,7 @@ static bool saveWavetable(const fs::path& path, const float* wavetable, size_t s
 
 static void updateFFTPlots()
 {
-    auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
+    auto signal = extractSignalRange(file.data(), regionStart, regionEnd,
         samplePeriod, numChannels, offset);
     int fftSize = kiss_fft_next_fast_size(static_cast<int>(signal.size()));
     kiss_fft_cfg cfg = kiss_fft_alloc(fftSize, false, 0, 0);
@@ -421,7 +427,7 @@ static void updateFFTPlots()
         frequencyPlot[i].x = i * frequencyStep;
         frequencyPlot[i].y = 10.0 * std::log10(
             output[i].r * output[i].r + output[i].i * output[i].i
-        );   
+        );
     }
 
     frequencyTablePlot.resize(fftSize / 2);
@@ -455,18 +461,18 @@ static void updateFFTPlots()
 static void extractTable()
 {
     harmonics.clear();
-    auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
+    auto signal = extractSignalRange(file.data(), regionStart, regionEnd,
         samplePeriod, numChannels, offset);
     float rootFrequency = 440.0f * std::pow(2.0f, (rootNote - 69) / 12.0f);
     float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * numHarmonics);
     float searchFrequency = 0.0f;
     while (searchFrequency < frequencyLimit) {
         searchFrequency += rootFrequency;
-        auto [frequency, harmonic] = 
-            frequencyPeakSearch(signal.data(), signal.size(), searchFrequency, 
+        auto [frequency, harmonic] =
+            frequencyPeakSearch(signal.data(), signal.size(), searchFrequency,
                 static_cast<float>(sampleRate));
 
-        if (harmonics.empty() 
+        if (harmonics.empty()
             || std::abs(harmonics.back().first - frequency) > rootFrequency / 2)
             harmonics.emplace_back(frequency, harmonic);
     }
@@ -476,7 +482,7 @@ static void extractTable()
     closeComputationModal.clear();
 
     tableFilename = "table.wav";
-    if (!saveWavetable(synth.getRootDirectory() / tableFilename, 
+    if (!saveWavetable(synth.getRootDirectory() / tableFilename,
         wavetable.data(), wavetable.size())) {
         tableFilename = "";
     }
@@ -512,8 +518,9 @@ static void drawButtons()
         reloadSfz.clear();
 
     ImGui::Button("Play sample", ImVec2(buttonWidth, 0.0f));
-    if (ImGui::IsItemActive() && ImGui::IsMouseClicked(0))
+    if (ImGui::IsItemActive() && ImGui::IsMouseClicked(0)){
         synth.sampleOn();
+    }
 
     if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
         synth.sampleOff();
@@ -534,7 +541,7 @@ static void drawButtons()
         synth.setWaveNote(waveNote);
         synth.waveOn();
     }
-    
+
     if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
         synth.waveOff();
 
@@ -559,7 +566,7 @@ static void drawButtons()
     // Modal popup
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Computation", nullptr, 
+    if (ImGui::BeginPopupModal("Computation", nullptr,
             ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize)) {
         ImGui::Text("Computing wavetables... (%d harmonics)", harmonics.size());
         if (!closeComputationModal.test_and_set())
@@ -569,13 +576,13 @@ static void drawButtons()
     }
 
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopup("Frequency", 
+    if (ImGui::BeginPopup("Frequency",
         ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize)) {
         if (ImPlot::BeginPlot("Frequency response", "Frequency (Hz)", nullptr,
             ImVec2(600, 0), ImPlotFlags_AntiAliased, ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_LogScale, ImPlotAxisFlags_AutoFit)) {
-            ImPlot::PlotLine("Sample", &frequencyPlot[0].x, &frequencyPlot[0].y, 
+            ImPlot::PlotLine("Sample", &frequencyPlot[0].x, &frequencyPlot[0].y,
                 static_cast<int>(frequencyPlot.size()), 0, sizeof(ImPlotPoint));
-            ImPlot::PlotLine("Table", &frequencyTablePlot[0].x, &frequencyTablePlot[0].y, 
+            ImPlot::PlotLine("Table", &frequencyTablePlot[0].x, &frequencyTablePlot[0].y,
                 static_cast<int>(frequencyTablePlot.size()), 0, sizeof(ImPlotPoint));
             ImPlot::EndPlot();
         }
@@ -741,13 +748,13 @@ for (ma_uint32 iDevice = 0; iDevice < playbackCount; iDevice += 1) {
     glfwGetWindowSize(window, &actualWindowWidth, &actualWindowHeight);
     glViewport(0, 0, actualWindowWidth, actualWindowHeight);
     glClearColor(0.12f, 0.12f, 0.12f, 1.0f);
-    
+
     // Set browser properties
     openDialog.SetTitle("Open file");
     openDialog.SetTypeFilters({ ".wav" });
-    
+
     saveDialog.SetTitle("Save table");
-    
+
     wavetable.resize(tableSize);
     for (int i = 0; i < tableSize; ++i)
         wavetable[i] = std::sin( 2 * 3.1415926535f * i / static_cast<float>(tableSize) );
@@ -792,7 +799,7 @@ for (ma_uint32 iDevice = 0; iDevice < playbackCount; iDevice += 1) {
             drawPlot();
             ImGui::EndChild();
         }
-                
+
         ImGui::SameLine();
         if (ImGui::BeginChild("Buttons", ImVec2(buttonGroupSize, groupHeight))) {
             drawButtons();
@@ -825,7 +832,7 @@ for (ma_uint32 iDevice = 0; iDevice < playbackCount; iDevice += 1) {
         {
             auto selected = saveDialog.GetSelected();
             lastDirectory = selected.parent_path();
-            pool.enqueue([selected] { 
+            pool.enqueue([selected] {
                 saveWavetable(selected, wavetable.data(), wavetable.size());
             });
             saveDialog.ClearSelected();
