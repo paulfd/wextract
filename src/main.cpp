@@ -109,9 +109,11 @@ static void rebuildSfzFile()
         sfzFile += fmt::format("    reverb_dry=100 reverb_wet={:.1f} reverb_input=100\n", reverb);
     }
 
-    if (!filename.empty())
-        sfzFile += fmt::format("<region> loop_mode=one_shot key=127 volume={:.1f} sample={}\n", volume, filename);
-    
+    if (!filename.empty()){
+      auto pan{offset?100:-100};
+      sfzFile += fmt::format("<region> loop_mode=one_shot key=127 volume={:.1f} sample={} offset={} end={} pan={}\n", volume, filename, int(regionStart*sampleRate), int(regionEnd*sampleRate), pan);
+    }
+
     sfzFile += fmt::format("<region> lokey=1 hikey=126 ");
 
     if (!tableFilename.empty())
@@ -152,14 +154,18 @@ static void drawPlot()
 
     if (ImPlot::BeginPlot(filename.c_str(), "time (seconds)", nullptr,
             ImVec2(-1, groupHeight), ImPlotFlags_AntiAliased)) {
-        ImPlot::PlotLine("", &plot[0].x, &plot[0].y, 
+        ImPlot::PlotLine("", &plot[0].x, &plot[0].y,
             static_cast<int>(plot.size()), 0, sizeof(ImPlotPoint));
         ImPlot::DragLineX("DragStart", &regionStart);
+	if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
+            reloadSfz.clear();
         ImPlot::DragLineX("DragStop", &regionEnd);
-        ImPlot::DragLineY("SustainLevel", &sustainLevel, true, 
+	if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
+            reloadSfz.clear();
+        ImPlot::DragLineY("SustainLevel", &sustainLevel, true,
             ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight));
         sustainLevel = std::max(0.0, sustainLevel);
-        if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0)) 
+        if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
             reloadSfz.clear();
 
         ImPlot::GetPlotDrawList()->AddRectFilled(
@@ -224,10 +230,35 @@ static void drawPlot()
     }
 }
 
+static void updateSampleRateNumChannelsAndSamplePeriod(std::string_view path){
+    ma_format format;
+    ma_uint32 channels{2};
+
+    ma_result result;
+
+    ma_decoder decoder;
+    result = ma_decoder_init_file(path.data(), NULL, &decoder);
+    if (result != MA_SUCCESS) {
+      return;   // An error occurred.
+    }
+
+    result = ma_data_source_get_data_format(&decoder, &format, &channels, &sampleRate);
+    numChannels = channels;
+    samplePeriod = 1.0 / static_cast<double>(sampleRate);
+    if (result != MA_SUCCESS) {
+      return;  // Failed to retrieve data format.
+    }
+    std::cerr << numChannels << " Channels found.\n";
+     ma_decoder_uninit(&decoder);
+}
+
+
 static void readFileSample(std::string_view path)
 {
     ma_decoder decoder;
-    ma_decoder_config decoder_config = ma_decoder_config_init(ma_format_f32, 2, sampleRate);
+    updateSampleRateNumChannelsAndSamplePeriod(path);
+
+    ma_decoder_config decoder_config = ma_decoder_config_init(ma_format_f32, numChannels, sampleRate);
     auto result = ma_decoder_init_file(path.data(), &decoder_config, &decoder);
     if (result != MA_SUCCESS){
         std::cerr << "Could not open sound file\n";
@@ -433,13 +464,17 @@ static void drawButtons()
         openDialog.Open();
     }
 
-    if (ImGui::RadioButton("Use left", &offset, 0))
+    if (ImGui::RadioButton("Use left", &offset, 0)){
+        reloadSfz.clear();
         updateFilePlot();
+    }
 
     ImGui::SameLine();
-    if (ImGui::RadioButton("Use right", &offset, 1))
+    if (ImGui::RadioButton("Use right", &offset, 1)){
+        reloadSfz.clear();
         updateFilePlot();
-    
+    }
+
     ImGui::SliderFloat("Volume", &volume, -60.0f, 40.0f);
     if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
         reloadSfz.clear();
