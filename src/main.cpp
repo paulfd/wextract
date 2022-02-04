@@ -569,23 +569,57 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
     synth->callback(output, static_cast<int>(frameCount));
 }
 
+static void glfw_error_callback(int error, const char* description)
+{
+    fprintf(stderr, "Glfw Error %d: %s\n", error, description);
+}
+
 int main(int argc, char *argv[])
 {
     closeComputationModal.test_and_set();
     reloadSfz.test_and_set();
     updateWavetable.test_and_set();
 
-    ma_device_config config = ma_device_config_init(ma_device_type_playback);
-    config.playback.format   = ma_format_f32;   
-    config.playback.channels = 0;               // Set to 0 to use the device's native channel count.
+ma_context context;
+ const std::array<ma_backend, 2> backendso {ma_backend_jack, ma_backend_alsa};
+ ma_context_config contextConfig;
+ contextConfig = ma_context_config_init();
+ if (ma_context_init(backendso.data(), backendso.size(), &contextConfig, &context) != MA_SUCCESS) {
+    // Error.
+   printf("Error initializing one of the configured contexts\n");
+}
+
+ma_device_info* pPlaybackInfos;
+ma_uint32 playbackCount;
+ma_device_info* pCaptureInfos;
+ma_uint32 captureCount;
+if (ma_context_get_devices(&context, &pPlaybackInfos, &playbackCount, &pCaptureInfos, &captureCount) != MA_SUCCESS) {
+  printf("Error ma_context_get_devices failed\n");
+}
+
+
+
+     ma_device_config config = ma_device_config_init(ma_device_type_playback);
+    config.playback.format   = ma_format_f32;
+    config.playback.channels = 2;               // Set to 0 to use the device's native channel count.
     config.sampleRate        = 0;               // Set to 0 to use the device's native sample rate.
     config.dataCallback      = data_callback;
     config.pUserData         = &synth;
 
+// Loop over each device info and do something with it. Here we just print the name with their index. You may want
+// to give the user the opportunity to choose which device they'd prefer.
+for (ma_uint32 iDevice = 0; iDevice < playbackCount; iDevice += 1) {
+    printf("%d - %s\n", iDevice, pPlaybackInfos[iDevice].name);
+    config.playback.pDeviceID = &pPlaybackInfos[iDevice].id;
+}
+
+
+
+
     ma_device device;
     defer { ma_device_uninit(&device); };
 
-    if (ma_device_init(NULL, &config, &device) != MA_SUCCESS) {
+    if (ma_device_init(&context, &config, &device) != MA_SUCCESS) {
         std::cerr << "[ERROR] Failed to initialize device\n";
         return -1;
     }
