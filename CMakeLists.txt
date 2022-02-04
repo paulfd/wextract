@@ -37,6 +37,8 @@ endif()
 
 add_library(glad STATIC src/glad.c)
 target_include_directories(glad PUBLIC include)
+find_package(glew QUIET)
+pkg_check_modules(glew REQUIRED IMPORTED_TARGET GLOBAL glew)
 
 add_library(imgui STATIC 
     third_party/imgui/imgui.cpp
@@ -47,7 +49,7 @@ add_library(imgui STATIC
     third_party/imgui/backends/imgui_impl_opengl3.cpp
     third_party/imgui/backends/imgui_impl_glfw.cpp
 )
-target_link_libraries(imgui PRIVATE glad glfw)
+target_link_libraries(imgui PRIVATE glad glfw PkgConfig::glew)
 target_include_directories(imgui PUBLIC third_party/imgui)
 target_include_directories(imgui PUBLIC third_party/imgui/backends)
 
