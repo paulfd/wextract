@@ -149,8 +149,9 @@ static void drawPlot()
         float xMax = static_cast<float>(numFrames * samplePeriod);
         ImPlot::SetNextPlotLimitsX(0.0f, xMax, ImGuiCond_Always);
     }
-
-    if (ImPlot::BeginPlot(filename.c_str(), "time (seconds)", nullptr,
+    
+    const char* name = filename.empty() ? "##plot" : filename.c_str();
+    if (ImPlot::BeginPlot(name, "time (seconds)", nullptr,
             ImVec2(-1, groupHeight), ImPlotFlags_AntiAliased)) {
         ImPlot::PlotLine("", &plot[0].x, &plot[0].y, 
             static_cast<int>(plot.size()), 0, sizeof(ImPlotPoint));
