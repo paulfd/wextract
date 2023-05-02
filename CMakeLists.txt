@@ -1,7 +1,8 @@
 project(WavetableExtract)
 cmake_minimum_required(VERSION 3.14)
 set (CMAKE_CXX_STANDARD 17)
-set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
 include(cmake/CPM.cmake)
 
 find_package(OpenGL REQUIRED)
@@ -35,7 +36,7 @@ add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl2.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
 )
 target_link_libraries(imgui PRIVATE glad glfw)
@@ -61,6 +62,13 @@ CPMAddPackage(
     "KISSFFT_TOOLS OFF"
     "KISSFFT_PKGCONFIG OFF"
 )
+CPMAddPackage(
+    NAME imgui_filebrowser
+    GITHUB_REPOSITORY "AirGuanZ/imgui-filebrowser"
+    GIT_TAG "cfccc2a"
+)
+add_library(imgui_filebrowser INTERFACE)
+target_include_directories(imgui_filebrowser INTERFACE ${imgui_filebrowser_SOURCE_DIR})
 
 # Make a non-console window
 if(MSVC)
@@ -68,9 +76,8 @@ if(MSVC)
 endif()
 
 add_executable(wextract src/main.cpp src/helpers.cpp src/synth.cpp)
-target_include_directories(wextract PRIVATE include third_party/imgui-filebrowser)        
 target_link_libraries(wextract PRIVATE OpenGL::GL sfizz_shared glad glfw imgui 
-    implot miniaudio fmt::fmt Eigen3::Eigen kissfft::kissfft)
+    implot miniaudio fmt::fmt Eigen3::Eigen kissfft::kissfft imgui_filebrowser)
 install(TARGETS wextract DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Disable note:
@@ -94,13 +101,11 @@ add_custom_command(TARGET wextract POST_BUILD
             "${PROJECT_SOURCE_DIR}/extras/trompette8_c2.wav"
             $<TARGET_FILE_DIR:wextract>)
 
-if (MSVC)
-    add_custom_command(TARGET wextract POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${PROJECT_SOURCE_DIR}/third_party/sfizz/$<CONFIG>/sfizz.dll"
-            $<TARGET_FILE_DIR:wextract>)
-endif()
-
 if(NOT MSVC)
     install(TARGETS wextract RUNTIME)
+else()
+    add_custom_command(TARGET wextract POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy -t $<TARGET_FILE_DIR:wextract> $<TARGET_RUNTIME_DLLS:wextract>
+    COMMAND_EXPAND_LISTS
+    )
 endif()
