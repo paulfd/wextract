@@ -1,8 +1,8 @@
 project(WavetableExtract)
 cmake_minimum_required(VERSION 3.14)
 set (CMAKE_CXX_STANDARD 17)
-# set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
+set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
 include(cmake/CPM.cmake)
 
 find_package(OpenGL REQUIRED)
@@ -10,12 +10,13 @@ find_package(OpenGL REQUIRED)
 CPMFindPackage(
     NAME glfw3
     GITHUB_REPOSITORY "glfw/glfw"
-    GIT_TAG 3.3.8
+    GIT_TAG 3.3.2
+    MODULE
 )
 CPMFindPackage(
     NAME fmt
     GITHUB_REPOSITORY "fmtlib/fmt"
-    GIT_TAG 9.1.0
+    GIT_TAG 6.1.0
 )
 CPMFindPackage(
     NAME sfizz
@@ -28,7 +29,6 @@ add_library(glad STATIC src/glad.c)
 target_include_directories(glad PUBLIC include)
 
 CPMAddPackage("gl:libeigen/eigen#1148f0a9ec48bcedac69c9ed66d4b2f6bab89344")
-
 CPMAddPackage("gh:ocornut/imgui@1.86")
 add_library(imgui STATIC 
     ${imgui_SOURCE_DIR}/imgui.cpp
