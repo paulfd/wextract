@@ -2,7 +2,37 @@
 // Copyright (c) 2021 Paul Ferrand
 
 #define NOMINMAX
-#include <glad/glad.h>
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+#include <GL/glew.h>            // Initialize with glewInit()
+#if defined(IMGUI_IMPL_OPENGL_ES2)
+#include <GLES2/gl2.h>
+// About Desktop OpenGL function loaders:
+//  Modern desktop OpenGL doesn't have a standard portable header file to load OpenGL function pointers.
+//  Helper libraries are often used for this purpose! Here we are supporting a few common ones (gl3w, glew, glad).
+//  You may use another loader/header of your choice (glext, glLoadGen, etc.), or chose to manually implement your own.
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GL3W)
+#include <GL/gl3w.h>            // Initialize with gl3wInit()
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLEW)
+#include <GL/glew.h>            // Initialize with glewInit()
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLAD)
+#include <glad/glad.h>          // Initialize with gladLoadGL()
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLAD2)
+#include <glad/gl.h>            // Initialize with gladLoadGL(...) or gladLoaderLoadGL()
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLBINDING2)
+#define GLFW_INCLUDE_NONE       // GLFW including OpenGL headers causes ambiguity or multiple definition errors.
+#include <glbinding/Binding.h>  // Initialize with glbinding::Binding::initialize()
+#include <glbinding/gl/gl.h>
+using namespace gl;
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLBINDING3)
+#define GLFW_INCLUDE_NONE       // GLFW including OpenGL headers causes ambiguity or multiple definition errors.
+#include <glbinding/glbinding.h>// Initialize with glbinding::initialize()
+#include <glbinding/gl/gl.h>
+using namespace gl;
+#endif
+
+
 #include <GLFW/glfw3.h>
 #include <string>
 #include <string_view>
@@ -15,19 +45,23 @@
 #include <mutex>
 #include <thread>
 #include <fmt/core.h>
-#include "imgui.h"
+
 #include "implot.h"
 #include "implot_internal.h"
-#include "imgui_impl_glfw.h"
 #include "imfilebrowser.h"
-#include "imgui_impl_opengl3.h"
 #include "sfizz.hpp"
 #include "synth.h"
 #include "helpers.h"
 #include "threadpool.h"
 #include "defer.h"
+/* #define MA_ENABLE_ONLY_SPECIFIC_BACKENDSMA_ENABLE_JACK
+  #define MA_ENABLE_JACK */
 #include "miniaudio.h"
 #include "kiss_fft.h"
+
+
+
+
 
 namespace fs = std::filesystem;
 
@@ -109,9 +143,11 @@ static void rebuildSfzFile()
         sfzFile += fmt::format("    reverb_dry=100 reverb_wet={:.1f} reverb_input=100\n", reverb);
     }
 
-    if (!filename.empty())
-        sfzFile += fmt::format("<region> loop_mode=one_shot key=127 volume={:.1f} sample={}\n", volume, filename);
-    
+    if (!filename.empty()){
+      auto pan{offset?100:-100};
+      sfzFile += fmt::format("<region> loop_mode=one_shot key=127 volume={:.1f} sample={} offset={} end={} pan={}\n", volume, filename, int(regionStart*sampleRate), int(regionEnd*sampleRate), pan);
+    }
+
     sfzFile += fmt::format("<region> lokey=1 hikey=126 ");
 
     if (!tableFilename.empty())
@@ -119,7 +155,7 @@ static void rebuildSfzFile()
     else
         sfzFile += "sample=*sine\n";
 
-    if (points.size() < 2)        
+    if (points.size() < 2)
         return;
 
     bool nonzeroEnd = points.back().y > 0.0f;
@@ -153,14 +189,18 @@ static void drawPlot()
     const char* name = filename.empty() ? "##plot" : filename.c_str();
     if (ImPlot::BeginPlot(name, "time (seconds)", nullptr,
             ImVec2(-1, groupHeight), ImPlotFlags_AntiAliased)) {
-        ImPlot::PlotLine("", &plot[0].x, &plot[0].y, 
+        ImPlot::PlotLine("", &plot[0].x, &plot[0].y,
             static_cast<int>(plot.size()), 0, sizeof(ImPlotPoint));
         ImPlot::DragLineX("DragStart", &regionStart);
+	if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
+            reloadSfz.clear();
         ImPlot::DragLineX("DragStop", &regionEnd);
-        ImPlot::DragLineY("SustainLevel", &sustainLevel, true, 
+	if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
+            reloadSfz.clear();
+        ImPlot::DragLineY("SustainLevel", &sustainLevel, true,
             ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight));
         sustainLevel = std::max(0.0, sustainLevel);
-        if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0)) 
+        if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
             reloadSfz.clear();
 
         ImPlot::GetPlotDrawList()->AddRectFilled(
@@ -168,7 +208,7 @@ static void drawPlot()
             ImPlot::PlotToPixels(ImPlotPoint(regionEnd, ImPlot::GetPlotLimits().Y.Max)),
             ImGui::GetColorU32(ImVec4(1, 1, 1, 0.25f))
         );
-        
+
         auto mousePlotPos = ImPlot::GetPlotMousePos();
         auto mousePos = ImGui::GetMousePos();
         if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(0) && io.KeyCtrl) {
@@ -183,8 +223,8 @@ static void drawPlot()
             NamedPlotPoint& p = *it;
             ImPlot::DragPoint(p.name.c_str(), &p.x, &p.y, false);
             p.y = std::max(0.0, p.y);
-            
-            if (ImGui::IsItemHovered() || ImGui::IsItemActive()) { 
+
+            if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
                 if (ImGui::IsMouseDoubleClicked(0)) {
                     it = points.erase(it);
                     reloadSfz.clear();
@@ -194,19 +234,19 @@ static void drawPlot()
                 if (ImGui::IsMouseDragging(0))
                     sortPoints();
 
-                if (ImGui::IsMouseReleased(0)) 
+                if (ImGui::IsMouseReleased(0))
                     reloadSfz.clear();
 
                 const ImVec2 pos = ImPlot::PlotToPixels(p.x, p.y);
                 ImPlotContext& gp = *ImPlot::GetCurrentContext();
                 gp.CurrentPlot->PlotHovered = false;
-                ImVec2 label_pos = pos + 
+                ImVec2 label_pos = pos +
                     ImVec2(16 * GImGui->Style.MouseCursorScale, 8 * GImGui->Style.MouseCursorScale);
                 char buff1[32];
                 char buff2[32];
                 ImPlot::LabelAxisValue(gp.CurrentPlot->XAxis, gp.XTicks, p.x, buff1, 32);
                 ImPlot::LabelAxisValue(gp.CurrentPlot->YAxis[0], gp.YTicks[0], p.y, buff2, 32);
-                gp.Annotations.Append(label_pos, ImVec2(0.0001f,0.00001f), col32, ImPlot::CalcTextColor(color), 
+                gp.Annotations.Append(label_pos, ImVec2(0.0001f,0.00001f), col32, ImPlot::CalcTextColor(color),
                     true, "%s,%s", buff1, buff2);
             }
             ++it;
@@ -225,10 +265,35 @@ static void drawPlot()
     }
 }
 
+static void updateSampleRateNumChannelsAndSamplePeriod(std::string_view path){
+    ma_format format;
+    ma_uint32 channels{2};
+
+    ma_result result;
+
+    ma_decoder decoder;
+    result = ma_decoder_init_file(path.data(), NULL, &decoder);
+    if (result != MA_SUCCESS) {
+      return;   // An error occurred.
+    }
+
+    result = ma_data_source_get_data_format(&decoder, &format, &channels, &sampleRate);
+    numChannels = channels;
+    samplePeriod = 1.0 / static_cast<double>(sampleRate);
+    if (result != MA_SUCCESS) {
+      return;  // Failed to retrieve data format.
+    }
+    std::cerr << numChannels << " Channels found.\n";
+     ma_decoder_uninit(&decoder);
+}
+
+
 static void readFileSample(std::string_view path)
 {
     ma_decoder decoder;
-    ma_decoder_config decoder_config = ma_decoder_config_init(ma_format_f32, 2, sampleRate);
+    updateSampleRateNumChannelsAndSamplePeriod(path);
+
+    ma_decoder_config decoder_config = ma_decoder_config_init(ma_format_f32, numChannels, sampleRate);
     auto result = ma_decoder_init_file(path.data(), &decoder_config, &decoder);
     if (result != MA_SUCCESS){
         std::cerr << "Could not open sound file\n";
@@ -284,7 +349,7 @@ static void drawWaveAndFile()
     const int size = static_cast<int>(tablePlot.size());
     ImPlot::SetNextPlotLimitsX(0.0, 1.0);
     if (ImPlot::BeginPlot("Wavetable", nullptr, nullptr,
-        ImVec2(plotWidth, plotWidth), 0, 
+        ImVec2(plotWidth, plotWidth), 0,
         ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoTickLabels,
         ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoTickLabels)) {
         ImPlot::PlotLine("", &tablePlot[0].x, &tablePlot[0].y, size, 0, sizeof(ImPlotPoint));
@@ -292,16 +357,16 @@ static void drawWaveAndFile()
     }
 
     ImGui::SameLine();
-    ImGui::InputTextMultiline("##source", const_cast<char*>(sfzFile.c_str()), sfzFile.size(), 
+    ImGui::InputTextMultiline("##source", const_cast<char*>(sfzFile.c_str()), sfzFile.size(),
         ImVec2(-1, plotWidth), ImGuiInputTextFlags_ReadOnly);
 }
 
 static bool saveWavetable(const fs::path& path, const float* wavetable, size_t size)
 {
     ma_encoder encoder;
-    ma_encoder_config config = 
+    ma_encoder_config config =
         ma_encoder_config_init(ma_resource_format_wav, ma_format_f32, 1, 44100);
-        
+
     std::string tablePath = path.string();
     ma_result result = ma_encoder_init_file(tablePath.c_str(), &config, &encoder);
     defer { ma_encoder_uninit(&encoder); };
@@ -316,7 +381,7 @@ static bool saveWavetable(const fs::path& path, const float* wavetable, size_t s
 
         if (fs::exists(path))
             fs::remove(path);
-        
+
         return false;
     }
 
@@ -325,7 +390,7 @@ static bool saveWavetable(const fs::path& path, const float* wavetable, size_t s
 
 static void updateFFTPlots()
 {
-    auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
+    auto signal = extractSignalRange(file.data(), regionStart, regionEnd,
         samplePeriod, numChannels, offset);
     int fftSize = kiss_fft_next_fast_size(static_cast<int>(signal.size()));
     kiss_fft_cfg cfg = kiss_fft_alloc(fftSize, false, 0, 0);
@@ -363,7 +428,7 @@ static void updateFFTPlots()
         frequencyPlot[i].x = i * frequencyStep;
         frequencyPlot[i].y = 10.0 * std::log10(
             output[i].r * output[i].r + output[i].i * output[i].i
-        );   
+        );
     }
 
     frequencyTablePlot.resize(fftSize / 2);
@@ -397,18 +462,18 @@ static void updateFFTPlots()
 static void extractTable()
 {
     harmonics.clear();
-    auto signal = extractSignalRange(file.data(), regionStart, regionEnd, 
+    auto signal = extractSignalRange(file.data(), regionStart, regionEnd,
         samplePeriod, numChannels, offset);
     float rootFrequency = 440.0f * std::pow(2.0f, (rootNote - 69) / 12.0f);
     float frequencyLimit = std::min(sampleRate / 2.0f, rootFrequency * numHarmonics);
     float searchFrequency = 0.0f;
     while (searchFrequency < frequencyLimit) {
         searchFrequency += rootFrequency;
-        auto [frequency, harmonic] = 
-            frequencyPeakSearch(signal.data(), signal.size(), searchFrequency, 
+        auto [frequency, harmonic] =
+            frequencyPeakSearch(signal.data(), signal.size(), searchFrequency,
                 static_cast<float>(sampleRate));
 
-        if (harmonics.empty() 
+        if (harmonics.empty()
             || std::abs(harmonics.back().first - frequency) > rootFrequency / 2)
             harmonics.emplace_back(frequency, harmonic);
     }
@@ -418,7 +483,7 @@ static void extractTable()
     closeComputationModal.clear();
 
     tableFilename = "table.wav";
-    if (!saveWavetable(synth.getRootDirectory() / tableFilename, 
+    if (!saveWavetable(synth.getRootDirectory() / tableFilename,
         wavetable.data(), wavetable.size())) {
         tableFilename = "";
     }
@@ -434,13 +499,17 @@ static void drawButtons()
         openDialog.Open();
     }
 
-    if (ImGui::RadioButton("Use left", &offset, 0))
+    if (ImGui::RadioButton("Use left", &offset, 0)){
+        reloadSfz.clear();
         updateFilePlot();
+    }
 
     ImGui::SameLine();
-    if (ImGui::RadioButton("Use right", &offset, 1))
+    if (ImGui::RadioButton("Use right", &offset, 1)){
+        reloadSfz.clear();
         updateFilePlot();
-    
+    }
+
     ImGui::SliderFloat("Volume", &volume, -60.0f, 40.0f);
     if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
         reloadSfz.clear();
@@ -450,8 +519,9 @@ static void drawButtons()
         reloadSfz.clear();
 
     ImGui::Button("Play sample", ImVec2(buttonWidth, 0.0f));
-    if (ImGui::IsItemActive() && ImGui::IsMouseClicked(0))
+    if (ImGui::IsItemActive() && ImGui::IsMouseClicked(0)){
         synth.sampleOn();
+    }
 
     if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
         synth.sampleOff();
@@ -472,7 +542,7 @@ static void drawButtons()
         synth.setWaveNote(waveNote);
         synth.waveOn();
     }
-    
+
     if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0))
         synth.waveOff();
 
@@ -497,7 +567,7 @@ static void drawButtons()
     // Modal popup
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Computation", nullptr, 
+    if (ImGui::BeginPopupModal("Computation", nullptr,
             ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize)) {
         ImGui::Text("Computing wavetables... (%d harmonics)", harmonics.size());
         if (!closeComputationModal.test_and_set())
@@ -507,13 +577,13 @@ static void drawButtons()
     }
 
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopup("Frequency", 
+    if (ImGui::BeginPopup("Frequency",
         ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize)) {
         if (ImPlot::BeginPlot("Frequency response", "Frequency (Hz)", nullptr,
             ImVec2(600, 0), ImPlotFlags_AntiAliased, ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_LogScale, ImPlotAxisFlags_AutoFit)) {
-            ImPlot::PlotLine("Sample", &frequencyPlot[0].x, &frequencyPlot[0].y, 
+            ImPlot::PlotLine("Sample", &frequencyPlot[0].x, &frequencyPlot[0].y,
                 static_cast<int>(frequencyPlot.size()), 0, sizeof(ImPlotPoint));
-            ImPlot::PlotLine("Table", &frequencyTablePlot[0].x, &frequencyTablePlot[0].y, 
+            ImPlot::PlotLine("Table", &frequencyTablePlot[0].x, &frequencyTablePlot[0].y,
                 static_cast<int>(frequencyTablePlot.size()), 0, sizeof(ImPlotPoint));
             ImPlot::EndPlot();
         }
@@ -535,23 +605,57 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
     synth->callback(output, static_cast<int>(frameCount));
 }
 
+static void glfw_error_callback(int error, const char* description)
+{
+    fprintf(stderr, "Glfw Error %d: %s\n", error, description);
+}
+
 int main(int argc, char *argv[])
 {
     closeComputationModal.test_and_set();
     reloadSfz.test_and_set();
     updateWavetable.test_and_set();
 
-    ma_device_config config = ma_device_config_init(ma_device_type_playback);
-    config.playback.format   = ma_format_f32;   
-    config.playback.channels = 0;               // Set to 0 to use the device's native channel count.
+ma_context context;
+ const std::array<ma_backend, 2> backendso {ma_backend_jack, ma_backend_alsa};
+ ma_context_config contextConfig;
+ contextConfig = ma_context_config_init();
+ if (ma_context_init(backendso.data(), backendso.size(), &contextConfig, &context) != MA_SUCCESS) {
+    // Error.
+   printf("Error initializing one of the configured contexts\n");
+}
+
+ma_device_info* pPlaybackInfos;
+ma_uint32 playbackCount;
+ma_device_info* pCaptureInfos;
+ma_uint32 captureCount;
+if (ma_context_get_devices(&context, &pPlaybackInfos, &playbackCount, &pCaptureInfos, &captureCount) != MA_SUCCESS) {
+  printf("Error ma_context_get_devices failed\n");
+}
+
+
+
+     ma_device_config config = ma_device_config_init(ma_device_type_playback);
+    config.playback.format   = ma_format_f32;
+    config.playback.channels = 2;               // Set to 0 to use the device's native channel count.
     config.sampleRate        = 0;               // Set to 0 to use the device's native sample rate.
     config.dataCallback      = data_callback;
     config.pUserData         = &synth;
 
+// Loop over each device info and do something with it. Here we just print the name with their index. You may want
+// to give the user the opportunity to choose which device they'd prefer.
+for (ma_uint32 iDevice = 0; iDevice < playbackCount; iDevice += 1) {
+    printf("%d - %s\n", iDevice, pPlaybackInfos[iDevice].name);
+    config.playback.pDeviceID = &pPlaybackInfos[iDevice].id;
+}
+
+
+
+
     ma_device device;
     defer { ma_device_uninit(&device); };
 
-    if (ma_device_init(NULL, &config, &device) != MA_SUCCESS) {
+    if (ma_device_init(&context, &config, &device) != MA_SUCCESS) {
         std::cerr << "[ERROR] Failed to initialize device\n";
         return -1;
     }
@@ -560,6 +664,7 @@ int main(int argc, char *argv[])
     synth.setSampleRate(device.sampleRate);
     ma_device_start(&device);
 
+    glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit()) {
         std::cerr << "[ERROR] Couldn't initialize GLFW\n";
         return -1;
@@ -572,47 +677,71 @@ int main(int argc, char *argv[])
     glfwWindowHint(GLFW_STENCIL_BITS, 8);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    std::string glsl_version = "";
-#ifdef __APPLE__
-    // GL 4.3 + GLSL 150
-    glsl_version = "#version 150";
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // required on Mac OS
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-#elif __linux__
-    // GL 4.3 + GLSL 150
-    glsl_version = "#version 150";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-#elif _WIN32
-    // GL 4.3 + GLSL 130
-    glsl_version = "#version 130";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    // Decide GL+GLSL versions
+#if defined(IMGUI_IMPL_OPENGL_ES2)
+    // GL ES 2.0 + GLSL 100
+    const char* glsl_version = "#version 100";
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
+#elif defined(__APPLE__)
+    // GL 3.2 + GLSL 150
+    const char* glsl_version = "#version 150";
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
+#else
+    // GL 3.0 + GLSL 130
+    const char* glsl_version = "#version 150";
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    //glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
+    //glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // 3.0+ only
 #endif
 
     GLFWwindow *window = glfwCreateWindow(
-        static_cast<int>(windowWidth), static_cast<int>(windowHeight), 
+        static_cast<int>(windowWidth), static_cast<int>(windowHeight),
         programName.c_str(), NULL, NULL);
-    defer { 
+    defer {
         glfwDestroyWindow(window);
         glfwTerminate();
     };
 
-    if (!window) {
+    if (window == NULL) {
         std::cerr << "[ERROR] Couldn't create a GLFW window\n";
         return -1;
     }
 
     // watch window resizing
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    //glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     glfwMakeContextCurrent(window);
     // VSync
-    glfwSwapInterval(1);
+    //glfwSwapInterval(1);
 
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        std::cerr << "[ERROR] Couldn't initialize GLAD" << '\n';
-        return -1;
+
+    // Initialize OpenGL loader
+#if defined(IMGUI_IMPL_OPENGL_LOADER_GL3W)
+    bool err = gl3wInit() != 0;
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLEW)
+    bool err = glewInit() != GLEW_OK;
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLAD)
+    bool err = gladLoadGL() == 0;
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLAD2)
+    bool err = gladLoadGL(glfwGetProcAddress) == 0; // glad2 recommend using the windowing library loader instead of the (optionally) bundled one.
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLBINDING2)
+    bool err = false;
+    glbinding::Binding::initialize();
+#elif defined(IMGUI_IMPL_OPENGL_LOADER_GLBINDING3)
+    bool err = false;
+    glbinding::initialize([](const char* name) { return (glbinding::ProcAddress)glfwGetProcAddress(name); });
+#else
+    bool err = false; // If you use IMGUI_IMPL_OPENGL_LOADER_CUSTOM, your loader is likely to requires some form of initialization.
+#endif
+    if (err)
+    {
+        fprintf(stderr, "Failed to initialize OpenGL loader!\n");
+        return 1;
     }
 
     int actualWindowWidth, actualWindowHeight;
@@ -620,13 +749,13 @@ int main(int argc, char *argv[])
     glfwGetWindowSize(window, &actualWindowWidth, &actualWindowHeight);
     glViewport(0, 0, actualWindowWidth, actualWindowHeight);
     glClearColor(0.12f, 0.12f, 0.12f, 1.0f);
-    
+
     // Set browser properties
     openDialog.SetTitle("Open file");
     openDialog.SetTypeFilters({ ".wav" });
-    
+
     saveDialog.SetTitle("Save table");
-    
+
     wavetable.resize(tableSize);
     for (int i = 0; i < tableSize; ++i)
         wavetable[i] = std::sin( 2 * 3.1415926535f * i / static_cast<float>(tableSize) );
@@ -646,7 +775,7 @@ int main(int argc, char *argv[])
 
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init(glsl_version.c_str());
+    ImGui_ImplOpenGL3_Init(glsl_version);
 
     while (!glfwWindowShouldClose(window))
     {
@@ -671,7 +800,7 @@ int main(int argc, char *argv[])
             drawPlot();
             ImGui::EndChild();
         }
-                
+
         ImGui::SameLine();
         if (ImGui::BeginChild("Buttons", ImVec2(buttonGroupSize, groupHeight))) {
             drawButtons();
@@ -704,7 +833,7 @@ int main(int argc, char *argv[])
         {
             auto selected = saveDialog.GetSelected();
             lastDirectory = selected.parent_path();
-            pool.enqueue([selected] { 
+            pool.enqueue([selected] {
                 saveWavetable(selected, wavetable.data(), wavetable.size());
             });
             saveDialog.ClearSelected();
